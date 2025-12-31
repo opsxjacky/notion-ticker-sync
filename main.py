@@ -57,6 +57,10 @@ def update_portfolio():
             # 处理不同类型的代码
             yf_ticker = ticker_symbol.upper()  # 转换为大写
             
+            # 0. 处理点号：yfinance 需要连字符而不是点号（如 BRK.B -> BRK-B）
+            if '.' in yf_ticker:
+                yf_ticker = yf_ticker.replace('.', '-')
+            
             # 1. 处理数字货币：添加 -USD 后缀
             if yf_ticker in CRYPTO_SYMBOLS:
                 yf_ticker = f"{yf_ticker}-USD"
