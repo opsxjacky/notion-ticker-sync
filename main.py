@@ -15,6 +15,15 @@ if not NOTION_TOKEN or not DATABASE_ID:
 # 初始化 Notion
 notion = Client(auth=NOTION_TOKEN)
 
+# 常见数字货币代码列表（需要添加 -USD 后缀）
+CRYPTO_SYMBOLS = {
+    'BTC', 'ETH', 'BNB', 'ADA', 'SOL', 'XRP', 'DOGE', 'DOT', 'MATIC', 
+    'AVAX', 'SHIB', 'TRX', 'LTC', 'UNI', 'ATOM', 'ETC', 'XLM', 'ALGO',
+    'VET', 'FIL', 'ICP', 'EOS', 'AAVE', 'THETA', 'SAND', 'AXS', 'MANA',
+    'GALA', 'ENJ', 'CHZ', 'FLOW', 'NEAR', 'FTM', 'CRV', 'MKR', 'COMP',
+    'SNX', 'SUSHI', 'YFI', '1INCH', 'BAT', 'ZRX', 'LINK', 'GRT'
+}
+
 def update_portfolio():
     # 1. 查询 Notion 数据库
     print(f"📥 正在查询 Notion 数据库: {DATABASE_ID} ...")
@@ -45,10 +54,15 @@ def update_portfolio():
         try:
             print(f"🔄 处理: {ticker_symbol}...", end="", flush=True)
             
-            # 处理 A 股代码：自动添加市场后缀
+            # 处理不同类型的代码
+            yf_ticker = ticker_symbol.upper()  # 转换为大写
+            
+            # 1. 处理数字货币：添加 -USD 后缀
+            if yf_ticker in CRYPTO_SYMBOLS:
+                yf_ticker = f"{yf_ticker}-USD"
+            # 2. 处理 A 股代码：自动添加市场后缀
             # 60开头是上海（.SS），00/30开头是深圳（.SZ）
-            yf_ticker = ticker_symbol
-            if ticker_symbol.isdigit() and len(ticker_symbol) == 6:
+            elif ticker_symbol.isdigit() and len(ticker_symbol) == 6:
                 if ticker_symbol.startswith('60'):
                     yf_ticker = f"{ticker_symbol}.SS"
                 elif ticker_symbol.startswith(('00', '30')):
@@ -78,7 +92,7 @@ def update_portfolio():
             if "is not a property that exists" in error_msg:
                 print(f" ❌ 失败: 字段不存在，请检查 Notion 数据库中的字段名")
             else:
-                print(f" ❌ 失败: {e}")
+            print(f" ❌ 失败: {e}")
         
         # 礼貌性延时，防止 API 速率限制
         time.sleep(0.5)
