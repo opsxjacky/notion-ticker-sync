@@ -53,7 +53,7 @@ def update_portfolio():
             notion.pages.update(
                 page_id=page_id,
                 properties={
-                    "Price": {"number": round(current_price, 2)},
+                    "现价": {"number": round(current_price, 2)},
                     "Last Updated": {"date": {"start": datetime.datetime.now().isoformat()}}
                 }
             )
