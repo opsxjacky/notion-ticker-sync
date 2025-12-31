@@ -1,0 +1,36 @@
+name: Auto Stock Sync
+
+on:
+  schedule:
+    # 计划任务：UTC 时间每天 21:00 (北京时间次日凌晨 05:00)
+    # 刚好美股收盘，A股开盘前
+    - cron: '0 21 * * 1-5' 
+  workflow_dispatch: # 允许你在 GitHub 网页上手动点击按钮触发
+
+jobs:
+  update-stocks:
+    runs-on: ubuntu-latest
+    
+    steps:
+    # 1. 拉取代码
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    # 2. 设置 Python 环境
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+
+    # 3. 安装依赖
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install notion-client yfinance
+
+    # 4. 运行脚本 (注入 Secrets)
+    - name: Run Sync Script
+      env:
+        NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+        DATABASE_ID: ${{ secrets.DATABASE_ID }}
+      run: python main.py
