@@ -92,7 +92,7 @@ def update_portfolio():
             if "is not a property that exists" in error_msg:
                 print(f" ❌ 失败: 字段不存在，请检查 Notion 数据库中的字段名")
             else:
-            print(f" ❌ 失败: {e}")
+                print(f" ❌ 失败: {e}")
         
         # 礼貌性延时，防止 API 速率限制
         time.sleep(0.5)
