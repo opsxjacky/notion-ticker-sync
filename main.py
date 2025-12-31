@@ -45,22 +45,40 @@ def update_portfolio():
         try:
             print(f"🔄 处理: {ticker_symbol}...", end="", flush=True)
             
+            # 处理 A 股代码：自动添加市场后缀
+            # 60开头是上海（.SS），00/30开头是深圳（.SZ）
+            yf_ticker = ticker_symbol
+            if ticker_symbol.isdigit() and len(ticker_symbol) == 6:
+                if ticker_symbol.startswith('60'):
+                    yf_ticker = f"{ticker_symbol}.SS"
+                elif ticker_symbol.startswith(('00', '30')):
+                    yf_ticker = f"{ticker_symbol}.SZ"
+            
             # 抓取股价
-            stock = yf.Ticker(ticker_symbol)
+            stock = yf.Ticker(yf_ticker)
             current_price = stock.fast_info.last_price
             
             # 更新 Notion
+            update_props = {
+                "现价": {"number": round(current_price, 2)}
+            }
+            
+            # 如果 Notion 数据库中有"最后更新时间"字段，取消下面的注释并修改字段名
+            # update_props["最后更新时间"] = {"date": {"start": datetime.datetime.now().isoformat()}}
+            
             notion.pages.update(
                 page_id=page_id,
-                properties={
-                    "现价": {"number": round(current_price, 2)},
-                    "Last Updated": {"date": {"start": datetime.datetime.now().isoformat()}}
-                }
+                properties=update_props
             )
             print(f" ✅ 成功 (价格: {current_price:.2f})")
             
         except Exception as e:
-            print(f" ❌ 失败: {e}")
+            error_msg = str(e)
+            # 如果只是字段不存在，给出更友好的提示
+            if "is not a property that exists" in error_msg:
+                print(f" ❌ 失败: 字段不存在，请检查 Notion 数据库中的字段名")
+            else:
+                print(f" ❌ 失败: {e}")
         
         # 礼貌性延时，防止 API 速率限制
         time.sleep(0.5)
