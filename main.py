@@ -32,13 +32,13 @@ def update_portfolio():
         page_id = page["id"]
         props = page["properties"]
         
-        # --- 解析 Ticker ---
+        # --- 解析股票代码 ---
         try:
-            ticker_list = props["Ticker"]["title"]
+            ticker_list = props["股票代码"]["title"]
             if not ticker_list: continue # 跳过空行
             ticker_symbol = ticker_list[0]["text"]["content"]
         except KeyError:
-            print("⚠️ 跳过无法识别的行 (缺少 Ticker)")
+            print("⚠️ 跳过无法识别的行 (缺少股票代码)")
             continue
 
         # --- 核心逻辑：获取并更新股票价格 ---
