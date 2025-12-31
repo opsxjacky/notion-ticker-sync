@@ -26,7 +26,8 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
+        # 强制安装最新版，并加上 --force-reinstall 确保没用旧缓存
+        pip install --force-reinstall notion-client==2.0.0 yfinance
 
     # 4. 运行脚本 (注入 Secrets)
     - name: Run Sync Script
