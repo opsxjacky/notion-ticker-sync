@@ -19,8 +19,8 @@ def update_portfolio():
     # 1. 查询 Notion 数据库
     print(f"📥 正在查询 Notion 数据库: {DATABASE_ID} ...")
     try:
-        query = notion.databases.query(database_id=DATABASE_ID)
-        pages = query.get("results")
+        response = notion.databases.query(database_id=DATABASE_ID)
+        pages = response.get("results", [])
     except Exception as e:
         print(f"❌ Notion 连接失败: {e}")
         return
