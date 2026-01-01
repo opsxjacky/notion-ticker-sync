@@ -268,12 +268,7 @@ def get_price_from_akshare(ticker_symbol, spot_cache=None, etf_cache=None):
         try:
             df = ak.fund_money_fund_daily_em(symbol=ticker_symbol)
             if df is not None and not df.empty:
-                # 货币基金通常净值为1，但这里我们尝试获取 '万份收益' 或 '七日年化' 吗？
-                # 不，我们通常需要净值。如果返回了数据，通常意味着基金存在。
-                # 很多货币基金净值固定为1，但有些可能有浮动。
-                # 如果没有单位净值字段，默认返回 1.0 (如果确认是货币基金)
-                # 但 akshare 的这个接口返回列: 净值日期, 每万份收益, 7日年化收益率, ...
-                # 如果是货币基金，价格通常是 1.0
+                # 货币基金通常净值为1
                 return 1.0
         except:
             pass
@@ -309,8 +304,10 @@ def update_portfolio():
     # 2. 预加载 Akshare 行情数据 (加速查询)
     spot_cache = {}
     etf_cache = {}
+    hk_cache = {}
+    
     if AKSHARE_AVAILABLE:
-        print("🚀 正在预加载 A股/ETF 行情数据 (加速查询)...")
+        print("🚀 正在预加载 A股/ETF/港股 行情数据 (加速查询)...")
         try:
             # 获取所有A股实时行情
             df_spot = ak.stock_zh_a_spot_em()
@@ -328,6 +325,15 @@ def update_portfolio():
             print(f"   - 已缓存 {len(etf_cache)} 只ETF行情")
         except Exception as e:
             print(f"   ⚠️ 预加载ETF行情失败: {e}")
+            
+        try:
+            # 获取所有港股实时行情
+            df_hk = ak.stock_hk_spot_em()
+            if df_hk is not None and not df_hk.empty:
+                hk_cache = {str(row['代码']): row for _, row in df_hk.iterrows()}
+            print(f"   - 已缓存 {len(hk_cache)} 只港股行情")
+        except Exception as e:
+            print(f"   ⚠️ 预加载港股行情失败: {e}")
 
     # 3. 查询 Notion 数据库
     print(f"📥 正在查询 Notion 数据库: {DATABASE_ID} ...")
@@ -462,6 +468,27 @@ def update_portfolio():
                     except:
                         pass
             
+            # 方法4: 如果是港股且yfinance失败，尝试使用akshare
+            if (current_price is None or (isinstance(current_price, (int, float)) and current_price == 0)) and calc_currency == "HKD":
+                # 尝试从 hk_cache 获取
+                # Akshare 港股代码通常是 5位数字，例如 00700
+                # Notion/Yfinance 可能是 0700 或 00700
+                hk_code = ticker_symbol.replace(".HK", "")
+                if len(hk_code) < 5:
+                    hk_code = hk_code.zfill(5)
+                
+                if hk_code in hk_cache:
+                    row = hk_cache[hk_code]
+                    for field in ['最新价', '收盘', '现价', 'current', 'close']:
+                        val = row.get(field)
+                        if val is not None and val != '-' and val != '':
+                            try:
+                                current_price = float(val)
+                                print(f" [使用akshare-hk]", end="", flush=True)
+                                break
+                            except:
+                                continue
+
             # 如果仍然无法获取价格，抛出异常
             if current_price is None or (isinstance(current_price, float) and current_price == 0):
                 raise ValueError(f"无法获取 {ticker_symbol} 的价格数据，可能是基金代码或已退市")
@@ -496,15 +523,22 @@ def update_portfolio():
                     
                     return pd.Series([])
                 
-                # 高速本地查A股名称和现价 (使用已有的缓存)
-                def get_name_price(symbol):
-                    if symbol in spot_cache:
-                        row = spot_cache[symbol]; return row.get('名称', ''), row.get('最新价', None)
-                    if symbol in etf_cache:
-                        row = etf_cache[symbol]; return row.get('名称', ''), row.get('最新价', None)
+                # 高速本地查A股/港股名称和现价 (使用已有的缓存)
+                def get_name_price(symbol, currency):
+                    # A股
+                    if currency == "CNY":
+                        if symbol in spot_cache:
+                            row = spot_cache[symbol]; return row.get('名称', ''), row.get('最新价', None)
+                        if symbol in etf_cache:
+                            row = etf_cache[symbol]; return row.get('名称', ''), row.get('最新价', None)
+                    # 港股
+                    if currency == "HKD":
+                        hk_code = symbol.replace(".HK", "").zfill(5)
+                        if hk_code in hk_cache:
+                            row = hk_cache[hk_code]; return row.get('名称', ''), row.get('最新价', None)
                     return '', None
                 
-                stock_name, current_price_a = get_name_price(ticker_symbol)
+                stock_name, current_price_a = get_name_price(ticker_symbol, calc_currency)
                 
                 # 若行情查不到则降级原逻辑 (但通常缓存应该有了)
                 if not stock_name:
@@ -532,6 +566,7 @@ def update_portfolio():
                     
                     # 2. 如果历史PE获取失败，尝试从实时行情中获取当前PE
                     if pe_ratio is None:
+                        # 检查 A股 spot_cache
                         if ticker_symbol in spot_cache:
                             val = spot_cache[ticker_symbol].get('市盈率-动态')
                             if val is not None:
@@ -539,6 +574,25 @@ def update_portfolio():
                                     pe_ratio = float(val)
                                 except:
                                     pass
+                        # 检查 ETF etf_cache (虽然通常没有，但以防万一)
+                        if pe_ratio is None and ticker_symbol in etf_cache:
+                            val = etf_cache[ticker_symbol].get('市盈率-动态') or etf_cache[ticker_symbol].get('市盈率')
+                            if val is not None:
+                                try:
+                                    pe_ratio = float(val)
+                                except:
+                                    pass
+
+                # 尝试获取港股 PE (从 Akshare 缓存)
+                if calc_currency == 'HKD' and pe_ratio is None:
+                    hk_code = ticker_symbol.replace(".HK", "").zfill(5)
+                    if hk_code in hk_cache:
+                        val = hk_cache[hk_code].get('市盈率-动态') or hk_cache[hk_code].get('市盈率')
+                        if val is not None:
+                            try:
+                                pe_ratio = float(val)
+                            except:
+                                pass
 
                 # 如果 PE 未获取到（非A股或A股获取失败），尝试使用 yfinance
                 if pe_ratio is None:
@@ -578,8 +632,17 @@ def update_portfolio():
             except Exception as e:
                 pass
 
-            # 优先使用加速缓存获取的A股现价
-            final_price = current_price_a if (calc_currency == "CNY" and current_price_a is not None) else current_price
+            # 优先使用加速缓存获取的A股/港股现价
+            final_price = current_price
+            if calc_currency == "CNY" and current_price_a is not None:
+                final_price = current_price_a
+            elif calc_currency == "HKD" and current_price_a is not None:
+                # 如果 yfinance 失败了，或者我们想优先用 akshare (这里逻辑是如果 yfinance 拿到了就用 yfinance，除非 yfinance 没拿到)
+                # 但上面的逻辑是：如果 yfinance 拿到 current_price，就用它。
+                # 如果没拿到，才去查 akshare。
+                # 所以这里 final_price = current_price 即可，因为 current_price 已经被 akshare 填充了（如果 yfinance 失败）
+                pass
+
             update_props = {
                 "现价": {"number": round(final_price, 2) if final_price is not None else None},
                 "汇率": {"number": round(target_rate, 4)},
