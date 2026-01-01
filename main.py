@@ -385,7 +385,7 @@ def update_portfolio():
                 "货币": {"select": {"name": current_currency_name}}
             }
             if stock_name:
-                update_props["股票名称"] = {"title": [{"text": {"content": stock_name}}]}
+                update_props["股票名称"] = {"rich_text": [{"text": {"content": stock_name}}]}
             
             # 如果 Notion 数据库中有"最后更新时间"字段，取消下面的注释并修改字段名
             # update_props["最后更新时间"] = {"date": {"start": datetime.datetime.now().isoformat()}}
