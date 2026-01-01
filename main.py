@@ -353,35 +353,51 @@ def update_portfolio():
             pe_percentile = None
             
             try:
-                if calc_currency == "CNY" and AKSHARE_AVAILABLE:
-                    # 获取A股名称（股票/ETF）
+                import os
+                import pandas as pd
+                CACHE_DIR = "./pe_cache"
+                os.makedirs(CACHE_DIR, exist_ok=True)
+                def get_pe_series_cached(symbol):
+                    cache_file = os.path.join(CACHE_DIR, f"{symbol}_pe.csv")
+                    if os.path.exists(cache_file):
+                        df = pd.read_csv(cache_file)
+                        return df['pe_ttm']
                     try:
-                        df = ak.stock_zh_a_spot_em()
+                        df = ak.stock_a_lg_indicator(symbol=symbol)
+                        if not df.empty:
+                            df[['date', 'pe_ttm']].to_csv(cache_file, index=False)
+                            return df['pe_ttm']
+                    except Exception as e:
+                        print(f"抓取{symbol}历史PE失败：{e}")
+                    return pd.Series([])
+                # 获取A股名称（股票/ETF）
+                try:
+                    df = ak.stock_zh_a_spot_em()
+                    match = df[df['代码'] == ticker_symbol]
+                    if not match.empty:
+                        stock_name = match.iloc[0].get('名称', "")
+                except:
+                    pass
+                if not stock_name:
+                    try:
+                        df = ak.fund_etf_spot_em()
                         match = df[df['代码'] == ticker_symbol]
                         if not match.empty:
                             stock_name = match.iloc[0].get('名称', "")
                     except:
                         pass
-                    if not stock_name:
-                        try:
-                            df = ak.fund_etf_spot_em()
-                            match = df[df['代码'] == ticker_symbol]
-                            if not match.empty:
-                                stock_name = match.iloc[0].get('名称', "")
-                        except:
-                            pass
-                    # 获取A股PE百分位
-                    pe_ratio = None
-                    pe_percentile = None
-                    try:
-                        df_pe = ak.stock_a_lg_indicator(symbol=ticker_symbol)
-                        if not df_pe.empty:
-                            pe_series = df_pe['pe_ttm'].dropna()
-                            if not pe_series.empty:
-                                pe_ratio = float(pe_series.iloc[-1])
-                                pe_percentile = float((pe_series < pe_ratio).sum()) / len(pe_series) * 100
-                    except:
-                        pass
+                # 批量缓存A股历史PE并计算百分位
+                pe_ratio = None
+                pe_percentile = None
+                try:
+                    pe_series = get_pe_series_cached(ticker_symbol)
+                    pe_series = pe_series.dropna()
+                    if not pe_series.empty:
+                        pe_ratio = float(pe_series.iloc[-1])
+                        pe_percentile = float((pe_series < pe_ratio).sum()) / len(pe_series) * 100
+                except Exception as e:
+                    print(f"{ticker_symbol} 百分位计算异常: {e}")
+
                 else:
                     # 美股/港股等使用yfinance
                     try:
