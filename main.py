@@ -90,110 +90,259 @@ def auto_detect_currency(ticker_name):
 
 def get_price_from_akshare(ticker_symbol, spot_cache=None, etf_cache=None):
     """
-    使用 akshare 获取中国基金价格/净值
-    修复：支持场外基金（00开头等），不再限制前缀。
+    使用 akshare 获取中国基金价格（备选数据源）
+    适用于 yfinance 无法获取的基金代码（ETF、债券基金等）
+    支持：51/50开头（上海ETF）、15/16开头（深圳ETF）、10开头（债券基金等）
+    
+    优化：支持传入 spot_cache 和 etf_cache (dict) 避免重复全量请求
     """
     if not AKSHARE_AVAILABLE:
         return None
     
-    # 1. 优先查缓存 (ETF/A股 实时行情)
-    # 这部分逻辑保留，因为 update_portfolio 传入了缓存，利用起来效率最高
-    if etf_cache is not None and ticker_symbol in etf_cache:
-        row = etf_cache[ticker_symbol]
-        for field in ['最新价', '收盘', '现价', 'close', 'current']:
-            val = row.get(field)
-            if val is not None and val != '-' and val != '':
-                try:
-                    return float(val)
-                except:
-                    continue
-
-    if spot_cache is not None and ticker_symbol in spot_cache:
-        row = spot_cache[ticker_symbol]
-        for field in ['最新价', '收盘', '现价', 'current', 'close']:
-            val = row.get(field)
-            if val is not None and val != '-' and val != '':
-                try:
-                    return float(val)
-                except:
-                    continue
-
-    # 2. 尝试 ETF/LOF 实时行情 (针对场内交易基金)
-    # 通常以 51, 50, 15, 16, 10 开头
-    if ticker_symbol.startswith(('51', '50', '15', '16', '10')):
-        try:
-            # 如果缓存没命中，尝试请求 ETF 实时 (虽然 update_portfolio 预加载了，但以防万一)
-            if etf_cache is None:
+    try:
+        # 判断是上海还是深圳，构建完整代码
+        full_code = ""
+        if ticker_symbol.startswith('51') or ticker_symbol.startswith('50'):
+            # 上海ETF基金
+            full_code = f"sh{ticker_symbol}"
+        elif ticker_symbol.startswith('15') or ticker_symbol.startswith('16'):
+            # 深圳ETF基金
+            full_code = f"sz{ticker_symbol}"
+        elif ticker_symbol.startswith('10'):
+            # 10开头可能是债券基金或其他类型基金（通常是上海）
+            full_code = f"sh{ticker_symbol}"
+        
+        # 方法1: 尝试使用实时行情接口（东方财富 - ETF基金）
+        # 优先查缓存
+        if etf_cache is not None and ticker_symbol in etf_cache:
+            row = etf_cache[ticker_symbol]
+            for field in ['最新价', '收盘', '现价', 'close', 'current']:
+                val = row.get(field)
+                if val is not None and val != '-' and val != '':
+                    try:
+                        return float(val)
+                    except:
+                        continue
+        
+        # 如果缓存没命中且没传缓存，才去请求
+        if etf_cache is None:
+            try:
                 df = ak.fund_etf_spot_em()
                 if df is not None and not df.empty:
+                    # 查找匹配的代码（精确匹配）
                     match = df[df['代码'] == ticker_symbol]
+                    if match.empty:
+                        # 如果精确匹配失败，尝试模糊匹配
+                        match = df[df['代码'].str.contains(ticker_symbol, na=False)]
                     if not match.empty:
-                        price = match.iloc[0].get('最新价')
-                        if price and str(price) != '-':
-                            return float(price)
-        except:
-            pass
-            
-        try:
-            # 尝试 A股 实时行情 (有些 LOF/分级基金在这里)
-            if spot_cache is None:
+                        # 尝试多个可能的字段名
+                        for field in ['最新价', '收盘', '现价', 'close', 'current']:
+                            price = match.iloc[0].get(field)
+                            if price is not None and price != '-' and price != '':
+                                try:
+                                    return float(price)
+                                except:
+                                    continue
+            except Exception as e:
+                pass
+        
+        # 方法1b: 尝试使用债券基金实时行情（如果是10开头）
+        if ticker_symbol.startswith('10'):
+            try:
+                # 尝试获取债券基金行情（使用股票接口，因为债券基金可能也在那里）
+                df = ak.bond_zh_hs_daily(symbol=ticker_symbol)
+                if df is not None and not df.empty:
+                    for field in ['收盘', 'close', '收盘价', '最新价']:
+                        if field in df.columns:
+                            close_price = df[field].iloc[-1]
+                            if close_price is not None:
+                                try:
+                                    return float(close_price)
+                                except:
+                                    continue
+            except:
+                pass
+        
+        # 方法2: 尝试使用股票实时行情（有些ETF和债券基金可能在这里）
+        if spot_cache is not None and ticker_symbol in spot_cache:
+            row = spot_cache[ticker_symbol]
+            for field in ['最新价', '收盘', '现价', 'current', 'close']:
+                val = row.get(field)
+                if val is not None and val != '-' and val != '':
+                    try:
+                        return float(val)
+                    except:
+                        continue
+        
+        if spot_cache is None:
+            try:
                 df = ak.stock_zh_a_spot_em()
                 if df is not None and not df.empty:
                     match = df[df['代码'] == ticker_symbol]
                     if not match.empty:
-                        price = match.iloc[0].get('最新价')
-                        if price and str(price) != '-':
-                            return float(price)
+                        for field in ['最新价', '收盘', '现价', 'current', 'close']:
+                            price = match.iloc[0].get(field)
+                            if price is not None and price != '-' and price != '':
+                                try:
+                                    return float(price)
+                                except:
+                                    continue
+            except:
+                pass
+        
+        # --- 优化：针对 0 开头的代码（通常是开放式基金），优先尝试开放式基金接口 ---
+        # 如果上面的 spot_cache (股票) 没命中，且是 0 开头，很大概率是场外基金
+        if ticker_symbol.startswith('0'):
+            # 优先尝试：开放式基金净值 (针对 00xxxx 等场外基金)
+            try:
+                df = ak.fund_open_fund_daily_em(symbol=ticker_symbol)
+                if df is not None and not df.empty:
+                    for field in ['单位净值', 'nav']:
+                        if field in df.columns:
+                            nav = df[field].iloc[-1]
+                            if nav is not None:
+                                try:
+                                    return float(nav)
+                                except:
+                                    continue
+            except:
+                pass
+            
+            # 其次尝试：开放式基金净值走势
+            try:
+                df = ak.fund_open_fund_info_em(fund=ticker_symbol, indicator="单位净值走势")
+                if df is not None and not df.empty:
+                    for field in ['y', 'nav', '单位净值']:
+                        if field in df.columns:
+                            nav = df[field].iloc[-1]
+                            if nav is not None:
+                                try:
+                                    return float(nav)
+                                except:
+                                    continue
+            except:
+                pass
+
+        # 方法3: 尝试获取历史数据（东方财富 - 推荐方法）
+        # 注意：对于场外基金，这个接口可能很慢或不支持，所以放在后面
+        try:
+            # 使用 fund_etf_hist_em 获取最近的数据
+            from datetime import timedelta
+            end_date = datetime.datetime.now().strftime("%Y%m%d")
+            start_date = (datetime.datetime.now() - timedelta(days=5)).strftime("%Y%m%d")
+            
+            df = ak.fund_etf_hist_em(
+                symbol=ticker_symbol,
+                period="daily",
+                start_date=start_date,
+                end_date=end_date,
+                adjust=""
+            )
+            if df is not None and not df.empty:
+                # 尝试多个可能的字段名
+                for field in ['收盘', 'close', '收盘价']:
+                    if field in df.columns:
+                        close_price = df[field].iloc[-1]
+                        if close_price is not None:
+                            try:
+                                return float(close_price)
+                            except:
+                                continue
+        except Exception as e:
+            pass
+        
+        # 方法4: 尝试使用新浪接口（备选）
+        if full_code:
+            try:
+                df = ak.fund_etf_hist_sina(symbol=full_code, period="daily", adjust="qfq")
+                if df is not None and not df.empty:
+                    # 返回最新收盘价
+                    for field in ['close', '收盘', '收盘价']:
+                        if field in df.columns:
+                            close_price = df[field].iloc[-1]
+                            if close_price is not None:
+                                try:
+                                    return float(close_price)
+                                except:
+                                    continue
+            except:
+                pass
+        
+        # 方法5: 尝试使用ETF基金净值接口
+        try:
+            df = ak.fund_etf_fund_info_em(fund=ticker_symbol, indicator="单位净值走势")
+            if df is not None and not df.empty:
+                # 获取最新净值
+                for field in ['净值', '单位净值', 'nav']:
+                    if field in df.columns:
+                        nav = df[field].iloc[-1]
+                        if nav is not None:
+                            try:
+                                return float(nav)
+                            except:
+                                continue
         except:
             pass
 
-    # 3. 尝试作为【场外基金/开放式基金】获取净值
-    # 适用于 00 开头，或者上面 ETF 没查到的情况
-    try:
-        # 接口 A: 单个基金的历史净值详情 (最准确)
-        # indicator="单位净值走势" 获取最新的一条
-        # print(f" [查询净值: {ticker_symbol}]", end="", flush=True)
-        df = ak.fund_open_fund_info_em(fund=ticker_symbol, indicator="单位净值走势")
-        if df is not None and not df.empty:
-            # 数据通常按日期排序，取最后一行
-            # 列名通常是 '净值日期', '单位净值', '日增长率'
-            for field in ['单位净值', 'nav', 'y']:
-                if field in df.columns:
-                    nav = df[field].iloc[-1]
-                    if nav is not None:
-                        try:
-                            return float(nav)
-                        except:
-                            continue
+        # 方法6: 尝试作为开放式基金获取净值 (通用兜底，不限制代码前缀)
+        # 即使上面针对0开头尝试过，如果失败了，这里作为最后的兜底再试一次也无妨
+        # 且对于非0开头的开放式基金（极少见但可能存在），这里是唯一入口
+        try:
+            df = ak.fund_open_fund_daily_em(symbol=ticker_symbol)
+            if df is not None and not df.empty:
+                for field in ['单位净值', 'nav']:
+                    if field in df.columns:
+                        nav = df[field].iloc[-1]
+                        if nav is not None:
+                            try:
+                                return float(nav)
+                            except:
+                                continue
+        except:
+            pass
+        
+        try:
+            df = ak.fund_open_fund_info_em(fund=ticker_symbol, indicator="单位净值走势")
+            if df is not None and not df.empty:
+                for field in ['y', 'nav', '单位净值']:
+                    if field in df.columns:
+                        nav = df[field].iloc[-1]
+                        if nav is not None:
+                            try:
+                                return float(nav)
+                            except:
+                                continue
+        except:
+            pass
+        
+        # 方法7: 尝试作为货币基金获取净值 (针对货币基金)
+        try:
+            df = ak.fund_money_fund_daily_em(symbol=ticker_symbol)
+            if df is not None and not df.empty:
+                # 货币基金通常净值为1
+                return 1.0
+        except:
+            pass
+
+        # 方法8: 尝试作为理财型基金
+        try:
+            df = ak.fund_financial_fund_daily_em(symbol=ticker_symbol)
+            if df is not None and not df.empty:
+                for field in ['单位净值', 'nav']:
+                    if field in df.columns:
+                        nav = df[field].iloc[-1]
+                        if nav is not None:
+                            try:
+                                return float(nav)
+                            except:
+                                continue
+        except:
+            pass
+            
     except Exception as e:
+        # 静默失败，返回 None
         pass
-
-    try:
-        # 接口 B: 开放式基金实时估值 (备选)
-        # 注意：ak.fund_open_fund_daily_em() 下载全量数据，较慢，仅在必要时尝试
-        # 如果是 00 开头且上面失败了，可能需要这个
-        # 但为了防止每次都下载全量，这里我们假设 info_em 应该能覆盖大多数情况
-        # 如果确实需要，可以取消注释，但要注意性能
-        # df = ak.fund_open_fund_daily_em()
-        # if df is not None and not df.empty:
-        #     match = df[df['基金代码'] == ticker_symbol]
-        #     if not match.empty:
-        #         nav = match.iloc[0].get('单位净值')
-        #         if nav: return float(nav)
-        pass
-    except:
-        pass
-
-    try:
-        # 接口 C: 货币基金
-        # ak.fund_money_fund_daily_em()
-        # 货币基金通常净值为 1.0
-        # 简单的判断：如果是 00 开头且前面都没查到，可能是货币基金？
-        # 或者直接返回 None，由用户手动设置
-        pass
-    except:
-        pass
-
+    
     return None
 
 def update_portfolio():
