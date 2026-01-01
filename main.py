@@ -347,11 +347,14 @@ def update_portfolio():
                 raise ValueError(f"无法获取 {ticker_symbol} 的价格数据，可能是基金代码或已退市")
             
             # 更新 Notion（使用中文列名）
-            # 获取股票名称
+            # 获取股票名称、PE和PE百分位
             stock_name = ""
+            pe_ratio = None
+            pe_percentile = None
+            
             try:
                 if calc_currency == "CNY" and AKSHARE_AVAILABLE:
-                    # 先尝试从股票实时行情获取
+                    # 获取A股名称（股票/ETF）
                     try:
                         df = ak.stock_zh_a_spot_em()
                         match = df[df['代码'] == ticker_symbol]
@@ -359,8 +362,6 @@ def update_portfolio():
                             stock_name = match.iloc[0].get('名称', "")
                     except:
                         pass
-                    
-                    # 如果股票行情没找到，尝试从ETF基金行情获取
                     if not stock_name:
                         try:
                             df = ak.fund_etf_spot_em()
@@ -369,11 +370,48 @@ def update_portfolio():
                                 stock_name = match.iloc[0].get('名称', "")
                         except:
                             pass
+                    # 获取A股PE百分位
+                    pe_ratio = None
+                    pe_percentile = None
+                    try:
+                        df_pe = ak.stock_a_lg_indicator(symbol=ticker_symbol)
+                        if not df_pe.empty:
+                            pe_series = df_pe['pe_ttm'].dropna()
+                            if not pe_series.empty:
+                                pe_ratio = float(pe_series.iloc[-1])
+                                pe_percentile = float((pe_series < pe_ratio).sum()) / len(pe_series) * 100
+                    except:
+                        pass
                 else:
                     # 美股/港股等使用yfinance
                     try:
                         stock_info = stock.info
                         stock_name = stock_info.get("shortName", "") or stock_info.get("longName", "")
+                        
+                        import numpy as np
+                        # 获取PE（优先使用trailingPE，如果没有则使用forwardPE）
+                        pe_ratio = stock_info.get("trailingPE") or stock_info.get("forwardPE")
+                        if pe_ratio is not None:
+                            try:
+                                pe_ratio = float(pe_ratio)
+                            except (ValueError, TypeError):
+                                pe_ratio = None
+                        # 获取PE百分位（基于历史5年1个月的数据）
+                        pe_percentile = None
+                        try:
+                            hist = stock.history(period="5y", interval="1mo")
+                            if hist is not None and not hist.empty and pe_ratio is not None and pe_ratio > 0:
+                                # 使用 info 的 trailingEps 作为近似，即所有历史点都用这个最新eps，近似即可
+                                trailing_eps = stock_info.get("trailingEps")
+                                if trailing_eps is not None and trailing_eps != 0:
+                                    hist_pe_ratios = hist['Close'] / float(trailing_eps)
+                                    hist_pe_ratios = hist_pe_ratios[hist_pe_ratios > 0]
+                                    if not hist_pe_ratios.empty:
+                                        pe_percentile = float(np.sum(hist_pe_ratios < pe_ratio)) / len(hist_pe_ratios) * 100
+                        except Exception as e:
+                            pass
+                        # yfinance 无法直接获取中国A股和无季报历史EPS，港美股可用该方法
+
                     except:
                         pass
             except Exception as e:
@@ -386,6 +424,10 @@ def update_portfolio():
             }
             if stock_name:
                 update_props["股票名称"] = {"rich_text": [{"text": {"content": stock_name}}]}
+            if pe_ratio is not None:
+                update_props["PE"] = {"number": round(pe_ratio, 2)}
+            if pe_percentile is not None:
+                update_props["PE百分位"] = {"number": round(pe_percentile, 2)}
             
             # 如果 Notion 数据库中有"最后更新时间"字段，取消下面的注释并修改字段名
             # update_props["最后更新时间"] = {"date": {"start": datetime.datetime.now().isoformat()}}
