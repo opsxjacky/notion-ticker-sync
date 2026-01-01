@@ -74,7 +74,7 @@ def auto_detect_currency(ticker_name):
 def get_price_from_akshare(ticker_symbol):
     """
     使用 akshare 获取中国ETF基金价格（备选数据源）
-    适用于 yfinance 无法获取的基金代码（如 512800, 512890 等）
+    适用于 yfinance 无法获取的基金代码（如 512800, 512890, 501018 等）
     """
     if not AKSHARE_AVAILABLE:
         return None
@@ -84,33 +84,71 @@ def get_price_from_akshare(ticker_symbol):
         if ticker_symbol.startswith('51') or ticker_symbol.startswith('50'):
             # 上海ETF基金
             full_code = f"sh{ticker_symbol}"
+            market = "sh"
         elif ticker_symbol.startswith('15') or ticker_symbol.startswith('16'):
             # 深圳ETF基金
             full_code = f"sz{ticker_symbol}"
+            market = "sz"
         else:
             return None
         
-        # 方法1: 尝试使用实时行情接口
+        # 方法1: 尝试使用实时行情接口（东方财富）
         try:
-            # 获取所有ETF实时行情
             df = ak.fund_etf_spot_em()
             if df is not None and not df.empty:
-                # 查找匹配的代码（代码格式可能是 512800 或 512800.SH）
-                match = df[df['代码'].str.contains(ticker_symbol, na=False)]
+                # 查找匹配的代码（精确匹配）
+                match = df[df['代码'] == ticker_symbol]
+                if match.empty:
+                    # 如果精确匹配失败，尝试模糊匹配
+                    match = df[df['代码'].str.contains(ticker_symbol, na=False)]
                 if not match.empty:
-                    # 返回最新价或收盘价
-                    price = match.iloc[0].get('最新价') or match.iloc[0].get('收盘')
-                    if price and price != '-':
-                        return float(price)
+                    # 尝试多个可能的字段名
+                    for field in ['最新价', '收盘', '现价', 'close', 'current']:
+                        price = match.iloc[0].get(field)
+                        if price is not None and price != '-' and price != '':
+                            try:
+                                return float(price)
+                            except:
+                                continue
+        except Exception as e:
+            pass
+        
+        # 方法2: 尝试使用股票实时行情（有些ETF可能在这里）
+        try:
+            df = ak.stock_zh_a_spot_em()
+            if df is not None and not df.empty:
+                match = df[df['代码'] == ticker_symbol]
+                if not match.empty:
+                    for field in ['最新价', '收盘', '现价']:
+                        price = match.iloc[0].get(field)
+                        if price is not None and price != '-' and price != '':
+                            try:
+                                return float(price)
+                            except:
+                                continue
         except:
             pass
         
-        # 方法2: 如果方法1失败，尝试获取历史数据
+        # 方法3: 尝试获取历史数据（新浪）
         try:
             df = ak.fund_etf_hist_sina(symbol=full_code, period="daily", adjust="qfq")
             if df is not None and not df.empty:
                 # 返回最新收盘价
-                return float(df['close'].iloc[-1])
+                close_price = df.get('close') or df.get('收盘')
+                if close_price is not None and len(close_price) > 0:
+                    return float(close_price.iloc[-1])
+        except:
+            pass
+        
+        # 方法4: 尝试使用基金净值接口
+        try:
+            # 使用基金代码查询（格式：sh501018）
+            df = ak.fund_etf_fund_info_em(fund=ticker_symbol, indicator="单位净值走势")
+            if df is not None and not df.empty:
+                # 获取最新净值
+                nav = df.get('净值') or df.get('单位净值')
+                if nav is not None and len(nav) > 0:
+                    return float(nav.iloc[-1])
         except:
             pass
             
