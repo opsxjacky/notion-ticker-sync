@@ -129,26 +129,62 @@ def get_price_from_akshare(ticker_symbol):
         except:
             pass
         
-        # 方法3: 尝试获取历史数据（新浪）
+        # 方法3: 尝试获取历史数据（东方财富 - 推荐方法）
+        try:
+            # 使用 fund_etf_hist_em 获取最近的数据
+            from datetime import datetime, timedelta
+            end_date = datetime.now().strftime("%Y%m%d")
+            start_date = (datetime.now() - timedelta(days=5)).strftime("%Y%m%d")
+            
+            df = ak.fund_etf_hist_em(
+                symbol=ticker_symbol,
+                period="daily",
+                start_date=start_date,
+                end_date=end_date,
+                adjust=""
+            )
+            if df is not None and not df.empty:
+                # 尝试多个可能的字段名
+                for field in ['收盘', 'close', '收盘价']:
+                    if field in df.columns:
+                        close_price = df[field].iloc[-1]
+                        if close_price is not None:
+                            try:
+                                return float(close_price)
+                            except:
+                                continue
+        except Exception as e:
+            pass
+        
+        # 方法4: 尝试使用新浪接口（备选）
         try:
             df = ak.fund_etf_hist_sina(symbol=full_code, period="daily", adjust="qfq")
             if df is not None and not df.empty:
                 # 返回最新收盘价
-                close_price = df.get('close') or df.get('收盘')
-                if close_price is not None and len(close_price) > 0:
-                    return float(close_price.iloc[-1])
+                for field in ['close', '收盘', '收盘价']:
+                    if field in df.columns:
+                        close_price = df[field].iloc[-1]
+                        if close_price is not None:
+                            try:
+                                return float(close_price)
+                            except:
+                                continue
         except:
             pass
         
-        # 方法4: 尝试使用基金净值接口
+        # 方法5: 尝试使用基金净值接口
         try:
-            # 使用基金代码查询（格式：sh501018）
             df = ak.fund_etf_fund_info_em(fund=ticker_symbol, indicator="单位净值走势")
             if df is not None and not df.empty:
                 # 获取最新净值
-                nav = df.get('净值') or df.get('单位净值')
-                if nav is not None and len(nav) > 0:
-                    return float(nav.iloc[-1])
+                for field in ['净值', '单位净值', 'nav']:
+                    if field in df.columns:
+                        nav = df[field].iloc[-1]
+                        if nav is not None:
+                            try:
+                                return float(nav)
+                            except:
+                                continue
         except:
             pass
             
