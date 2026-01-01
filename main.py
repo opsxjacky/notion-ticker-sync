@@ -445,15 +445,22 @@ def update_portfolio():
             try:
                 # -------PE持久缓存--------
                 def get_pe_series_cached(symbol):
+                    # 过滤非股票代码（简单的判断：ETF/基金通常以1, 5开头，债券基金等）
+                    # A股股票通常以 0, 3, 6, 4, 8 开头
+                    if not (symbol.startswith('0') or symbol.startswith('3') or symbol.startswith('6') or symbol.startswith('4') or symbol.startswith('8')):
+                         return pd.Series([])
+
                     cache_file = os.path.join(CACHE_DIR, f"{symbol}_pe.csv")
                     if os.path.exists(cache_file):
                         df = pd.read_csv(cache_file)
                         return df['pe_ttm']
+                    
                     try:
-                        df = ak.stock_a_lg_indicator(symbol=symbol)
-                        if not df.empty:
-                            df[['date', 'pe_ttm']].to_csv(cache_file, index=False)
-                            return df['pe_ttm']
+                        if hasattr(ak, 'stock_a_lg_indicator'):
+                            df = ak.stock_a_lg_indicator(symbol=symbol)
+                            if not df.empty:
+                                df[['date', 'pe_ttm']].to_csv(cache_file, index=False)
+                                return df['pe_ttm']
                     except Exception as e:
                         print(f"抓取{symbol}历史PE失败：{e}")
                     
@@ -483,6 +490,7 @@ def update_portfolio():
                 
                 # 仅当货币为 CNY 时才尝试作为 A 股获取 PE
                 if calc_currency == 'CNY':
+                    # 1. 尝试获取历史PE计算百分位
                     try:
                         pe_series = get_pe_series_cached(ticker_symbol)
                         pe_series = pe_series.dropna()
@@ -491,6 +499,16 @@ def update_portfolio():
                             pe_percentile = float((pe_series < pe_ratio).sum()) / len(pe_series) * 100
                     except Exception as e:
                         print(f"{ticker_symbol} 百分位计算异常: {e}")
+                    
+                    # 2. 如果历史PE获取失败，尝试从实时行情中获取当前PE
+                    if pe_ratio is None:
+                        if ticker_symbol in spot_cache:
+                            val = spot_cache[ticker_symbol].get('市盈率-动态')
+                            if val is not None:
+                                try:
+                                    pe_ratio = float(val)
+                                except:
+                                    pass
 
                 # 如果 PE 未获取到（非A股或A股获取失败），尝试使用 yfinance
                 if pe_ratio is None:
