@@ -83,6 +83,8 @@ def auto_detect_currency(ticker_name):
         return "CNY"  # A股
     elif ".HK" in ticker:
         return "HKD"  # 港股
+    elif ticker.isdigit() and len(ticker) == 6:
+        return "CNY"  # 纯数字6位代码默认为A股/基金
     else:
         return "USD"  # 美股/加密货币/默认
 
