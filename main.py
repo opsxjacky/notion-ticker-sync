@@ -41,6 +41,9 @@ CRYPTO_SYMBOLS = {
     'SNX', 'SUSHI', 'YFI', '1INCH', 'BAT', 'ZRX', 'LINK', 'GRT'
 }
 
+# PE 缓存目录
+CACHE_DIR = "./pe_cache"
+
 def get_exchange_rates():
     """
     获取实时汇率 (基准: CNY)
@@ -345,6 +348,47 @@ def get_price_from_akshare(ticker_symbol, spot_cache=None, etf_cache=None):
     
     return None
 
+
+def get_pe_series_cached(symbol):
+    """从 akshare 获取历史 PE 数据并缓存到本地"""
+    # 过滤非股票代码（简单的判断：ETF/基金通常以1, 5开头，债券基金等）
+    # A股股票通常以 0, 3, 6, 4, 8 开头
+    if not (symbol.startswith('0') or symbol.startswith('3') or symbol.startswith('6') or symbol.startswith('4') or symbol.startswith('8')):
+         return pd.Series([])
+
+    cache_file = os.path.join(CACHE_DIR, f"{symbol}_pe.csv")
+    if os.path.exists(cache_file):
+        df = pd.read_csv(cache_file)
+        return df['pe_ttm']
+    
+    try:
+        if hasattr(ak, 'stock_a_lg_indicator'):
+            df = ak.stock_a_lg_indicator(symbol=symbol)
+            if not df.empty:
+                df[['date', 'pe_ttm']].to_csv(cache_file, index=False)
+                return df['pe_ttm']
+    except Exception as e:
+        print(f"抓取{symbol}历史PE失败：{e}")
+    
+    return pd.Series([])
+
+
+def get_name_price(symbol, currency, spot_cache, etf_cache, hk_cache):
+    """高速本地查A股/港股名称和现价 (使用已有的缓存)"""
+    # A股
+    if currency == "CNY":
+        if symbol in spot_cache:
+            row = spot_cache[symbol]; return row.get('名称', ''), row.get('最新价', None)
+        if symbol in etf_cache:
+            row = etf_cache[symbol]; return row.get('名称', ''), row.get('最新价', None)
+    # 港股
+    if currency == "HKD":
+        hk_code = symbol.replace(".HK", "").zfill(5)
+        if hk_code in hk_cache:
+            row = hk_cache[hk_code]; return row.get('名称', ''), row.get('最新价', None)
+    return '', None
+
+
 def update_portfolio():
     if not notion:
         raise ValueError("❌ 错误: 未找到 NOTION_TOKEN 或 DATABASE_ID 环境变量")
@@ -408,7 +452,6 @@ def update_portfolio():
     print(f"🔍 找到 {len(pages)} 条持仓记录，开始更新...")
 
     # 准备 PE 缓存目录
-    CACHE_DIR = "./pe_cache"
     os.makedirs(CACHE_DIR, exist_ok=True)
 
     # 4. 遍历更新股票价格
@@ -546,45 +589,7 @@ def update_portfolio():
             pe_percentile = None
             
             try:
-                # -------PE持久缓存--------
-                def get_pe_series_cached(symbol):
-                    # 过滤非股票代码（简单的判断：ETF/基金通常以1, 5开头，债券基金等）
-                    # A股股票通常以 0, 3, 6, 4, 8 开头
-                    if not (symbol.startswith('0') or symbol.startswith('3') or symbol.startswith('6') or symbol.startswith('4') or symbol.startswith('8')):
-                         return pd.Series([])
-
-                    cache_file = os.path.join(CACHE_DIR, f"{symbol}_pe.csv")
-                    if os.path.exists(cache_file):
-                        df = pd.read_csv(cache_file)
-                        return df['pe_ttm']
-                    
-                    try:
-                        if hasattr(ak, 'stock_a_lg_indicator'):
-                            df = ak.stock_a_lg_indicator(symbol=symbol)
-                            if not df.empty:
-                                df[['date', 'pe_ttm']].to_csv(cache_file, index=False)
-                                return df['pe_ttm']
-                    except Exception as e:
-                        print(f"抓取{symbol}历史PE失败：{e}")
-                    
-                    return pd.Series([])
-                
-                # 高速本地查A股/港股名称和现价 (使用已有的缓存)
-                def get_name_price(symbol, currency):
-                    # A股
-                    if currency == "CNY":
-                        if symbol in spot_cache:
-                            row = spot_cache[symbol]; return row.get('名称', ''), row.get('最新价', None)
-                        if symbol in etf_cache:
-                            row = etf_cache[symbol]; return row.get('名称', ''), row.get('最新价', None)
-                    # 港股
-                    if currency == "HKD":
-                        hk_code = symbol.replace(".HK", "").zfill(5)
-                        if hk_code in hk_cache:
-                            row = hk_cache[hk_code]; return row.get('名称', ''), row.get('最新价', None)
-                    return '', None
-                
-                stock_name, current_price_a = get_name_price(ticker_symbol, calc_currency)
+                stock_name, current_price_a = get_name_price(ticker_symbol, calc_currency, spot_cache, etf_cache, hk_cache)
                 
                 # 若行情查不到则降级原逻辑 (但通常缓存应该有了)
                 if not stock_name:
