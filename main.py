@@ -708,7 +708,14 @@ def update_portfolio():
                 page_id=page_id,
                 properties=update_props
             )
-            print(f" ✅ 成功 (价格: {current_price:.2f} | 汇率: {target_rate:.4f})")
+            
+            log_message = f"价格: {final_price:.2f} | 汇率: {target_rate:.4f}"
+            if pe_ratio is not None:
+                log_message += f" | PE: {pe_ratio:.2f}"
+            if pe_percentile is not None:
+                log_message += f" | PE百分位: {pe_percentile:.2f}%"
+
+            print(f" ✅ 成功 ({log_message})")
             
         except Exception as e:
             error_msg = str(e)
