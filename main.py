@@ -349,6 +349,26 @@ def get_price_from_akshare(ticker_symbol, spot_cache=None, etf_cache=None):
     return None
 
 
+def get_hk_pe_series_cached(symbol):
+    """从 akshare 获取港股历史 PE 数据并缓存到本地"""
+    symbol = symbol.replace(".HK", "").zfill(5)
+    cache_file = os.path.join(CACHE_DIR, f"{symbol}_pe.csv")
+    if os.path.exists(cache_file):
+        df = pd.read_csv(cache_file)
+        return df['pe_ratio']
+    
+    try:
+        if hasattr(ak, 'stock_hk_indicator'):
+            df = ak.stock_hk_indicator(symbol=symbol)
+            if not df.empty:
+                df[['trade_date', 'pe_ratio']].to_csv(cache_file, index=False)
+                return df['pe_ratio']
+    except Exception as e:
+        print(f"抓取港股{symbol}历史PE失败：{e}")
+    
+    return pd.Series([])
+
+
 def get_pe_series_cached(symbol):
     """从 akshare 获取历史 PE 数据并缓存到本地"""
     # 过滤非股票代码（简单的判断：ETF/基金通常以1, 5开头，债券基金等）
@@ -635,15 +655,27 @@ def update_portfolio():
                                     pass
 
                 # 尝试获取港股 PE (从 Akshare 缓存)
-                if calc_currency == 'HKD' and pe_ratio is None:
-                    hk_code = ticker_symbol.replace(".HK", "").zfill(5)
-                    if hk_code in hk_cache:
-                        val = hk_cache[hk_code].get('市盈率-动态') or hk_cache[hk_code].get('市盈率')
-                        if val is not None:
-                            try:
-                                pe_ratio = float(val)
-                            except:
-                                pass
+                if calc_currency == 'HKD':
+                    # 1. 尝试获取历史PE计算百分位
+                    try:
+                        pe_series = get_hk_pe_series_cached(ticker_symbol)
+                        pe_series = pe_series.dropna()
+                        if not pe_series.empty:
+                            pe_ratio = float(pe_series.iloc[-1])
+                            pe_percentile = float((pe_series < pe_ratio).sum()) / len(pe_series) * 100
+                    except Exception as e:
+                        print(f"{ticker_symbol} 港股百分位计算异常: {e}")
+
+                    # 2. 如果历史PE获取失败，尝试从实时行情中获取当前PE
+                    if pe_ratio is None:
+                        hk_code = ticker_symbol.replace(".HK", "").zfill(5)
+                        if hk_code in hk_cache:
+                            val = hk_cache[hk_code].get('市盈率-动态') or hk_cache[hk_code].get('市盈率')
+                            if val is not None:
+                                try:
+                                    pe_ratio = float(val)
+                                except:
+                                    pass
 
                 # 如果 PE 未获取到（非A股或A股获取失败），尝试使用 yfinance
                 if pe_ratio is None:
@@ -701,10 +733,10 @@ def update_portfolio():
             }
             if stock_name:
                 update_props["股票名称"] = {"rich_text": [{"text": {"content": stock_name}}]}
-            if pe_ratio is not None:
-                update_props["PE"] = {"number": round(pe_ratio, 2)}
-            if pe_percentile is not None:
-                update_props["PE百分位"] = {"number": round(pe_percentile, 2)}
+            
+            # 更新 PE 和 PE 百分位 (如果获取不到则清空)
+            update_props["PE"] = {"number": round(pe_ratio, 2) if pe_ratio is not None else None}
+            update_props["PE百分位"] = {"number": round(pe_percentile, 2) if pe_percentile is not None else None}
             
             # 如果 Notion 数据库中有"最后更新时间"字段，取消下面的注释并修改字段名
             # update_props["最后更新时间"] = {"date": {"start": datetime.datetime.now().isoformat()}}
