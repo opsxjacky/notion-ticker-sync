@@ -2,6 +2,8 @@ import os
 import time
 import datetime
 import pandas as pd
+import json
+import pickle
 
 try:
     import yfinance as yf
@@ -43,6 +45,8 @@ CRYPTO_SYMBOLS = {
 
 # PE 缓存目录
 CACHE_DIR = "./pe_cache"
+# Akshare 数据缓存目录
+AKSHARE_CACHE_DIR = "./akshare_cache"
 
 def get_exchange_rates():
     """
@@ -50,6 +54,23 @@ def get_exchange_rates():
     返回: {'USD': 7.28, 'HKD': 0.93, 'CNY': 1.0}
     """
     print("💱 正在获取实时汇率...")
+    
+    # 检查缓存
+    os.makedirs(AKSHARE_CACHE_DIR, exist_ok=True)
+    rates_cache_file = os.path.join(AKSHARE_CACHE_DIR, "exchange_rates.json")
+    
+    try:
+        if os.path.exists(rates_cache_file):
+            # 检查文件修改时间是否是今天
+            mod_time = os.path.getmtime(rates_cache_file)
+            if datetime.date.fromtimestamp(mod_time) == datetime.date.today():
+                with open(rates_cache_file, 'r') as f:
+                    rates = json.load(f)
+                print("   - 从缓存加载汇率")
+                return rates
+    except Exception:
+        pass # 缓存读取失败，则重新获取
+
     rates = {"CNY": 1.0}
     
     if yf is None:
@@ -74,6 +95,13 @@ def get_exchange_rates():
             print(f"   ⚠️ 获取 {currency} 汇率失败, 使用默认值")
             if currency == "USD": rates["USD"] = 7.28
             if currency == "HKD": rates["HKD"] = 0.93
+    
+    # 写入缓存
+    try:
+        with open(rates_cache_file, 'w') as f:
+            json.dump(rates, f)
+    except Exception:
+        pass # 缓存写入失败，不影响主流程
             
     return rates
 
@@ -427,39 +455,69 @@ def update_portfolio():
     
     if AKSHARE_AVAILABLE:
         print("🚀 正在预加载 A股/ETF/港股 行情数据 (加速查询)...")
+        os.makedirs(AKSHARE_CACHE_DIR, exist_ok=True)
+        
+        # --- A股行情缓存 ---
+        spot_cache_file = os.path.join(AKSHARE_CACHE_DIR, "spot_cache.pkl")
         try:
-            # 获取所有A股实时行情
-            df_spot = ak.stock_zh_a_spot_em()
-            if df_spot is not None and not df_spot.empty:
-                spot_cache = {str(row['代码']): row for _, row in df_spot.iterrows()}
-            print(f"   - 已缓存 {len(spot_cache)} 只A股行情")
+            if os.path.exists(spot_cache_file) and datetime.date.fromtimestamp(os.path.getmtime(spot_cache_file)) == datetime.date.today():
+                with open(spot_cache_file, 'rb') as f:
+                    spot_cache = pickle.load(f)
+                print(f"   - (缓存) 已加载 {len(spot_cache)} 只A股行情")
+            else:
+                df_spot = ak.stock_zh_a_spot_em()
+                if df_spot is not None and not df_spot.empty:
+                    spot_cache = {str(row['代码']): row for _, row in df_spot.iterrows()}
+                    with open(spot_cache_file, 'wb') as f: pickle.dump(spot_cache, f)
+                print(f"   - (实时) 已缓存 {len(spot_cache)} 只A股行情")
         except Exception as e:
             print(f"   ⚠️ 预加载A股行情失败: {e}")
 
+        # --- ETF行情缓存 ---
+        etf_cache_file = os.path.join(AKSHARE_CACHE_DIR, "etf_cache.pkl")
         try:
-            # 获取所有ETF实时行情
-            df_etf = ak.fund_etf_spot_em()
-            if df_etf is not None and not df_etf.empty:
-                etf_cache = {str(row['代码']): row for _, row in df_etf.iterrows()}
-            print(f"   - 已缓存 {len(etf_cache)} 只ETF行情")
+            if os.path.exists(etf_cache_file) and datetime.date.fromtimestamp(os.path.getmtime(etf_cache_file)) == datetime.date.today():
+                with open(etf_cache_file, 'rb') as f:
+                    etf_cache = pickle.load(f)
+                print(f"   - (缓存) 已加载 {len(etf_cache)} 只ETF行情")
+            else:
+                df_etf = ak.fund_etf_spot_em()
+                if df_etf is not None and not df_etf.empty:
+                    etf_cache = {str(row['代码']): row for _, row in df_etf.iterrows()}
+                    with open(etf_cache_file, 'wb') as f: pickle.dump(etf_cache, f)
+                print(f"   - (实时) 已缓存 {len(etf_cache)} 只ETF行情")
         except Exception as e:
             print(f"   ⚠️ 预加载ETF行情失败: {e}")
             
+        # --- 港股行情缓存 ---
+        hk_cache_file = os.path.join(AKSHARE_CACHE_DIR, "hk_cache.pkl")
         try:
-            # 获取所有港股实时行情
-            df_hk = ak.stock_hk_spot_em()
-            if df_hk is not None and not df_hk.empty:
-                hk_cache = {str(row['代码']): row for _, row in df_hk.iterrows()}
-            print(f"   - 已缓存 {len(hk_cache)} 只港股行情")
+            if os.path.exists(hk_cache_file) and datetime.date.fromtimestamp(os.path.getmtime(hk_cache_file)) == datetime.date.today():
+                with open(hk_cache_file, 'rb') as f:
+                    hk_cache = pickle.load(f)
+                print(f"   - (缓存) 已加载 {len(hk_cache)} 只港股行情")
+            else:
+                df_hk = ak.stock_hk_spot_em()
+                if df_hk is not None and not df_hk.empty:
+                    hk_cache = {str(row['代码']): row for _, row in df_hk.iterrows()}
+                    with open(hk_cache_file, 'wb') as f: pickle.dump(hk_cache, f)
+                print(f"   - (实时) 已缓存 {len(hk_cache)} 只港股行情")
         except Exception as e:
             print(f"   ⚠️ 预加载港股行情失败: {e}")
             
+        # --- 开放式基金名称缓存 ---
+        open_fund_cache_file = os.path.join(AKSHARE_CACHE_DIR, "open_fund_cache.pkl")
         try:
-            # 获取所有开放式基金列表 (用于匹配名称)
-            df_open_fund = ak.fund_name_em()
-            if df_open_fund is not None and not df_open_fund.empty:
-                open_fund_cache = {str(row['基金代码']): row for _, row in df_open_fund.iterrows()}
-            print(f"   - 已缓存 {len(open_fund_cache)} 只开放式基金名称")
+            if os.path.exists(open_fund_cache_file) and datetime.date.fromtimestamp(os.path.getmtime(open_fund_cache_file)) == datetime.date.today():
+                with open(open_fund_cache_file, 'rb') as f:
+                    open_fund_cache = pickle.load(f)
+                print(f"   - (缓存) 已加载 {len(open_fund_cache)} 只开放式基金名称")
+            else:
+                df_open_fund = ak.fund_name_em()
+                if df_open_fund is not None and not df_open_fund.empty:
+                    open_fund_cache = {str(row['基金代码']): row for _, row in df_open_fund.iterrows()}
+                    with open(open_fund_cache_file, 'wb') as f: pickle.dump(open_fund_cache, f)
+                print(f"   - (实时) 已缓存 {len(open_fund_cache)} 只开放式基金名称")
         except Exception as e:
             print(f"   ⚠️ 预加载开放式基金列表失败: {e}")
 

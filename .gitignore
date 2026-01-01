@@ -27,3 +27,7 @@ ENV/
 Thumbs.db
 
 .aider*
+
+# Cache directories
+pe_cache/
+akshare_cache/
