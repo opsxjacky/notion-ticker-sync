@@ -223,8 +223,18 @@ def update_portfolio():
     # 2. 查询 Notion 数据库
     print(f"📥 正在查询 Notion 数据库: {DATABASE_ID} ...")
     try:
-        response = notion.databases.query(database_id=DATABASE_ID)
-        pages = response.get("results", [])
+        # 先获取数据库信息
+        database = notion.databases.retrieve(database_id=DATABASE_ID)
+        # 检查是否有数据源（多数据源数据库）
+        if 'data_sources' in database and database['data_sources']:
+            # 使用多数据源查询方式
+            data_source_id = database['data_sources'][0]['id']
+            response = notion.data_sources.query(data_source_id=data_source_id)
+            pages = response.get("results", [])
+        else:
+            # 单数据源数据库，尝试使用 search 或其他方法
+            # 注意：新版 API 可能不再支持直接 query，需要查询页面
+            raise Exception("单数据源数据库暂不支持，请使用多数据源数据库")
     except Exception as e:
         print(f"❌ Notion 连接失败: {e}")
         return
