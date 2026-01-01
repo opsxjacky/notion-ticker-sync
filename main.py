@@ -417,23 +417,29 @@ def update_portfolio():
                             current_price_a = match.iloc[0].get('最新价', None)
                     except:
                         pass
+                
                 # 批量缓存A股历史PE并计算百分位
                 pe_ratio = None
                 pe_percentile = None
-                try:
-                    pe_series = get_pe_series_cached(ticker_symbol)
-                    pe_series = pe_series.dropna()
-                    if not pe_series.empty:
-                        pe_ratio = float(pe_series.iloc[-1])
-                        pe_percentile = float((pe_series < pe_ratio).sum()) / len(pe_series) * 100
-                except Exception as e:
-                    print(f"{ticker_symbol} 百分位计算异常: {e}")
+                
+                # 仅当货币为 CNY 时才尝试作为 A 股获取 PE
+                if calc_currency == 'CNY':
+                    try:
+                        pe_series = get_pe_series_cached(ticker_symbol)
+                        pe_series = pe_series.dropna()
+                        if not pe_series.empty:
+                            pe_ratio = float(pe_series.iloc[-1])
+                            pe_percentile = float((pe_series < pe_ratio).sum()) / len(pe_series) * 100
+                    except Exception as e:
+                        print(f"{ticker_symbol} 百分位计算异常: {e}")
 
-                else:
+                # 如果 PE 未获取到（非A股或A股获取失败），尝试使用 yfinance
+                if pe_ratio is None:
                     # 美股/港股等使用yfinance
                     try:
                         stock_info = stock.info
-                        stock_name = stock_info.get("shortName", "") or stock_info.get("longName", "")
+                        if not stock_name:
+                            stock_name = stock_info.get("shortName", "") or stock_info.get("longName", "")
                         
                         import numpy as np
                         # 获取PE（优先使用trailingPE，如果没有则使用forwardPE）
