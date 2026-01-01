@@ -121,10 +121,10 @@ def get_price_from_akshare(ticker_symbol):
         # 方法1b: 尝试使用债券基金实时行情（如果是10开头）
         if ticker_symbol.startswith('10'):
             try:
-                # 尝试获取债券基金行情
-                df = ak.bond_zh_hs_daily(symbol=full_code)
+                # 尝试获取债券基金行情（使用股票接口，因为债券基金可能也在那里）
+                df = ak.bond_zh_hs_daily(symbol=ticker_symbol)
                 if df is not None and not df.empty:
-                    for field in ['收盘', 'close', '收盘价']:
+                    for field in ['收盘', 'close', '收盘价', '最新价']:
                         if field in df.columns:
                             close_price = df[field].iloc[-1]
                             if close_price is not None:
