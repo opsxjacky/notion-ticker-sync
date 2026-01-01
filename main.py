@@ -351,13 +351,31 @@ def update_portfolio():
             stock_name = ""
             try:
                 if calc_currency == "CNY" and AKSHARE_AVAILABLE:
-                    df = ak.stock_zh_a_spot_em()
-                    match = df[df['代码'] == ticker_symbol]
-                    if not match.empty:
-                        stock_name = match.iloc[0].get('名称', "")
+                    # 先尝试从股票实时行情获取
+                    try:
+                        df = ak.stock_zh_a_spot_em()
+                        match = df[df['代码'] == ticker_symbol]
+                        if not match.empty:
+                            stock_name = match.iloc[0].get('名称', "")
+                    except:
+                        pass
+                    
+                    # 如果股票行情没找到，尝试从ETF基金行情获取
+                    if not stock_name:
+                        try:
+                            df = ak.fund_etf_spot_em()
+                            match = df[df['代码'] == ticker_symbol]
+                            if not match.empty:
+                                stock_name = match.iloc[0].get('名称', "")
+                        except:
+                            pass
                 else:
-                    stock_info = stock.info
-                    stock_name = stock_info.get("shortName", "") or stock_info.get("longName", "")
+                    # 美股/港股等使用yfinance
+                    try:
+                        stock_info = stock.info
+                        stock_name = stock_info.get("shortName", "") or stock_info.get("longName", "")
+                    except:
+                        pass
             except Exception as e:
                 pass
 
