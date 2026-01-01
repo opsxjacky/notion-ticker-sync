@@ -355,8 +355,30 @@ def update_portfolio():
             try:
                 import os
                 import pandas as pd
+                # -------批量A股名称/现价缓存块--------
                 CACHE_DIR = "./pe_cache"
                 os.makedirs(CACHE_DIR, exist_ok=True)
+                # 全局行情缓存（提升名称和现价查询速度）
+                if not hasattr(update_portfolio, "_spot_cache"):  # 只初始化一次
+                    try:
+                        spot_df = ak.stock_zh_a_spot_em()
+                        update_portfolio._spot_dict = {row['代码']: row for _, row in spot_df.iterrows()}
+                    except Exception as e:
+                        update_portfolio._spot_dict = {}
+                    try:
+                        etf_df = ak.fund_etf_spot_em()
+                        update_portfolio._etf_dict = {row['代码']: row for _, row in etf_df.iterrows()}
+                    except Exception as e:
+                        update_portfolio._etf_dict = {}
+                def get_name_price(symbol):
+                    d = update_portfolio._spot_dict
+                    if symbol in d:
+                        row = d[symbol]; return row.get('名称', ''), row.get('最新价', None)
+                    d = update_portfolio._etf_dict
+                    if symbol in d:
+                        row = d[symbol]; return row.get('名称', ''), row.get('最新价', None)
+                    return '', None
+                # -------PE持久缓存--------
                 def get_pe_series_cached(symbol):
                     cache_file = os.path.join(CACHE_DIR, f"{symbol}_pe.csv")
                     if os.path.exists(cache_file):
@@ -370,20 +392,23 @@ def update_portfolio():
                     except Exception as e:
                         print(f"抓取{symbol}历史PE失败：{e}")
                     return pd.Series([])
-                # 获取A股名称（股票/ETF）
-                try:
-                    df = ak.stock_zh_a_spot_em()
-                    match = df[df['代码'] == ticker_symbol]
-                    if not match.empty:
-                        stock_name = match.iloc[0].get('名称', "")
-                except:
-                    pass
+                # 高速本地查A股名称和现价
+                stock_name, current_price_a = get_name_price(ticker_symbol)
+                # 若行情查不到则降级原逻辑
                 if not stock_name:
                     try:
-                        df = ak.fund_etf_spot_em()
+                        df = ak.stock_zh_a_spot_em()
                         match = df[df['代码'] == ticker_symbol]
                         if not match.empty:
                             stock_name = match.iloc[0].get('名称', "")
+                    except:
+                        pass
+                if current_price_a is None:
+                    try:
+                        etf_df = ak.fund_etf_spot_em()
+                        match = etf_df[etf_df['代码'] == ticker_symbol]
+                        if not match.empty:
+                            current_price_a = match.iloc[0].get('最新价', None)
                     except:
                         pass
                 # 批量缓存A股历史PE并计算百分位
@@ -433,8 +458,10 @@ def update_portfolio():
             except Exception as e:
                 pass
 
+            # 优先使用加速缓存获取的A股现价
+            final_price = current_price_a if (calc_currency == "CNY" and current_price_a is not None) else current_price
             update_props = {
-                "现价": {"number": round(current_price, 2)},
+                "现价": {"number": round(final_price, 2) if final_price is not None else None},
                 "汇率": {"number": round(target_rate, 4)},
                 "货币": {"select": {"name": current_currency_name}}
             }
