@@ -1,7 +1,12 @@
 import os
 import time
 import datetime
-import yfinance as yf
+try:
+    import yfinance as yf
+except ImportError:
+    yf = None
+    print("⚠️ yfinance 未安装，将无法获取美股/港股/加密货币数据（可选安装: pip install yfinance）")
+
 from notion_client import Client
 
 # 尝试导入 akshare（用于获取中国ETF基金数据）
@@ -41,6 +46,12 @@ def get_exchange_rates():
     """
     print("💱 正在获取实时汇率...")
     rates = {"CNY": 1.0}
+    
+    if yf is None:
+        print("   ⚠️ yfinance 未安装，使用默认汇率")
+        rates["USD"] = 7.28
+        rates["HKD"] = 0.93
+        return rates
     
     # 定义汇率代码 (Yahoo Finance)
     pairs = {
@@ -311,23 +322,27 @@ def update_portfolio():
                     yf_ticker = f"{ticker_symbol}.SZ"
             
             # 抓取股价
-            stock = yf.Ticker(yf_ticker)
+            stock = None
+            if yf:
+                stock = yf.Ticker(yf_ticker)
             
             # 尝试多种方式获取价格
             current_price = None
             
             # 方法1: 使用 yfinance 的 fast_info
             try:
-                current_price = stock.fast_info.last_price
+                if stock:
+                    current_price = stock.fast_info.last_price
             except:
                 pass
             
             # 方法2: 如果 fast_info 失败，尝试获取历史数据
             if current_price is None:
                 try:
-                    hist = stock.history(period="1d")
-                    if not hist.empty:
-                        current_price = hist['Close'].iloc[-1]
+                    if stock:
+                        hist = stock.history(period="1d")
+                        if not hist.empty:
+                            current_price = hist['Close'].iloc[-1]
                 except:
                     pass
             
@@ -437,33 +452,34 @@ def update_portfolio():
                 if pe_ratio is None:
                     # 美股/港股等使用yfinance
                     try:
-                        stock_info = stock.info
-                        if not stock_name:
-                            stock_name = stock_info.get("shortName", "") or stock_info.get("longName", "")
-                        
-                        import numpy as np
-                        # 获取PE（优先使用trailingPE，如果没有则使用forwardPE）
-                        pe_ratio = stock_info.get("trailingPE") or stock_info.get("forwardPE")
-                        if pe_ratio is not None:
+                        if stock:
+                            stock_info = stock.info
+                            if not stock_name:
+                                stock_name = stock_info.get("shortName", "") or stock_info.get("longName", "")
+                            
+                            import numpy as np
+                            # 获取PE（优先使用trailingPE，如果没有则使用forwardPE）
+                            pe_ratio = stock_info.get("trailingPE") or stock_info.get("forwardPE")
+                            if pe_ratio is not None:
+                                try:
+                                    pe_ratio = float(pe_ratio)
+                                except (ValueError, TypeError):
+                                    pe_ratio = None
+                            # 获取PE百分位（基于历史5年1个月的数据）
+                            pe_percentile = None
                             try:
-                                pe_ratio = float(pe_ratio)
-                            except (ValueError, TypeError):
-                                pe_ratio = None
-                        # 获取PE百分位（基于历史5年1个月的数据）
-                        pe_percentile = None
-                        try:
-                            hist = stock.history(period="5y", interval="1mo")
-                            if hist is not None and not hist.empty and pe_ratio is not None and pe_ratio > 0:
-                                # 使用 info 的 trailingEps 作为近似，即所有历史点都用这个最新eps，近似即可
-                                trailing_eps = stock_info.get("trailingEps")
-                                if trailing_eps is not None and trailing_eps != 0:
-                                    hist_pe_ratios = hist['Close'] / float(trailing_eps)
-                                    hist_pe_ratios = hist_pe_ratios[hist_pe_ratios > 0]
-                                    if not hist_pe_ratios.empty:
-                                        pe_percentile = float(np.sum(hist_pe_ratios < pe_ratio)) / len(hist_pe_ratios) * 100
-                        except Exception as e:
-                            pass
-                        # yfinance 无法直接获取中国A股和无季报历史EPS，港美股可用该方法
+                                hist = stock.history(period="5y", interval="1mo")
+                                if hist is not None and not hist.empty and pe_ratio is not None and pe_ratio > 0:
+                                    # 使用 info 的 trailingEps 作为近似，即所有历史点都用这个最新eps，近似即可
+                                    trailing_eps = stock_info.get("trailingEps")
+                                    if trailing_eps is not None and trailing_eps != 0:
+                                        hist_pe_ratios = hist['Close'] / float(trailing_eps)
+                                        hist_pe_ratios = hist_pe_ratios[hist_pe_ratios > 0]
+                                        if not hist_pe_ratios.empty:
+                                            pe_percentile = float(np.sum(hist_pe_ratios < pe_ratio)) / len(hist_pe_ratios) * 100
+                            except Exception as e:
+                                pass
+                            # yfinance 无法直接获取中国A股和无季报历史EPS，港美股可用该方法
 
                     except:
                         pass
