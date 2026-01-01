@@ -188,7 +188,41 @@ def get_price_from_akshare(ticker_symbol, spot_cache=None, etf_cache=None):
             except:
                 pass
         
+        # --- 优化：针对 0 开头的代码（通常是开放式基金），优先尝试开放式基金接口 ---
+        # 如果上面的 spot_cache (股票) 没命中，且是 0 开头，很大概率是场外基金
+        if ticker_symbol.startswith('0'):
+            # 优先尝试：开放式基金净值 (针对 00xxxx 等场外基金)
+            try:
+                df = ak.fund_open_fund_daily_em(symbol=ticker_symbol)
+                if df is not None and not df.empty:
+                    for field in ['单位净值', 'nav']:
+                        if field in df.columns:
+                            nav = df[field].iloc[-1]
+                            if nav is not None:
+                                try:
+                                    return float(nav)
+                                except:
+                                    continue
+            except:
+                pass
+            
+            # 其次尝试：开放式基金净值走势
+            try:
+                df = ak.fund_open_fund_info_em(fund=ticker_symbol, indicator="单位净值走势")
+                if df is not None and not df.empty:
+                    for field in ['y', 'nav', '单位净值']:
+                        if field in df.columns:
+                            nav = df[field].iloc[-1]
+                            if nav is not None:
+                                try:
+                                    return float(nav)
+                                except:
+                                    continue
+            except:
+                pass
+
         # 方法3: 尝试获取历史数据（东方财富 - 推荐方法）
+        # 注意：对于场外基金，这个接口可能很慢或不支持，所以放在后面
         try:
             # 使用 fund_etf_hist_em 获取最近的数据
             from datetime import timedelta
@@ -248,37 +282,35 @@ def get_price_from_akshare(ticker_symbol, spot_cache=None, etf_cache=None):
         except:
             pass
 
-        # 方法5b: 尝试使用开放式基金净值走势 (针对 00xxxx 等)
-        try:
-            df = ak.fund_open_fund_info_em(fund=ticker_symbol, indicator="单位净值走势")
-            if df is not None and not df.empty:
-                # 字段通常是 'x' (日期), 'y' (净值)
-                for field in ['y', 'nav', '单位净值']:
-                    if field in df.columns:
-                        nav = df[field].iloc[-1]
-                        if nav is not None:
-                            try:
-                                return float(nav)
-                            except:
-                                continue
-        except:
-            pass
-
-        # 方法6: 尝试作为开放式基金获取净值 (针对 00xxxx 等场外基金)
-        try:
-            df = ak.fund_open_fund_daily_em(symbol=ticker_symbol)
-            if df is not None and not df.empty:
-                # 字段通常是 '单位净值'
-                for field in ['单位净值', 'nav']:
-                    if field in df.columns:
-                        nav = df[field].iloc[-1]
-                        if nav is not None:
-                            try:
-                                return float(nav)
-                            except:
-                                continue
-        except:
-            pass
+        # 方法6: 尝试作为开放式基金获取净值 (如果不是0开头，或者上面0开头逻辑失败)
+        if not ticker_symbol.startswith('0'):
+            try:
+                df = ak.fund_open_fund_daily_em(symbol=ticker_symbol)
+                if df is not None and not df.empty:
+                    for field in ['单位净值', 'nav']:
+                        if field in df.columns:
+                            nav = df[field].iloc[-1]
+                            if nav is not None:
+                                try:
+                                    return float(nav)
+                                except:
+                                    continue
+            except:
+                pass
+            
+            try:
+                df = ak.fund_open_fund_info_em(fund=ticker_symbol, indicator="单位净值走势")
+                if df is not None and not df.empty:
+                    for field in ['y', 'nav', '单位净值']:
+                        if field in df.columns:
+                            nav = df[field].iloc[-1]
+                            if nav is not None:
+                                try:
+                                    return float(nav)
+                                except:
+                                    continue
+            except:
+                pass
         
         # 方法7: 尝试作为货币基金获取净值 (针对货币基金)
         try:
