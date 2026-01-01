@@ -80,24 +80,40 @@ def get_price_from_akshare(ticker_symbol):
         return None
     
     try:
-        # 判断是上海还是深圳
+        # 判断是上海还是深圳，构建完整代码
         if ticker_symbol.startswith('51') or ticker_symbol.startswith('50'):
             # 上海ETF基金
-            market = "sh"
+            full_code = f"sh{ticker_symbol}"
         elif ticker_symbol.startswith('15') or ticker_symbol.startswith('16'):
             # 深圳ETF基金
-            market = "sz"
+            full_code = f"sz{ticker_symbol}"
         else:
             return None
         
-        # 构建完整的代码（如 sh512800）
-        full_code = f"{market}{ticker_symbol}"
+        # 方法1: 尝试使用实时行情接口
+        try:
+            # 获取所有ETF实时行情
+            df = ak.fund_etf_spot_em()
+            if df is not None and not df.empty:
+                # 查找匹配的代码（代码格式可能是 512800 或 512800.SH）
+                match = df[df['代码'].str.contains(ticker_symbol, na=False)]
+                if not match.empty:
+                    # 返回最新价或收盘价
+                    price = match.iloc[0].get('最新价') or match.iloc[0].get('收盘')
+                    if price and price != '-':
+                        return float(price)
+        except:
+            pass
         
-        # 使用 akshare 获取实时行情
-        df = ak.fund_etf_hist_sina(symbol=full_code, period="daily", adjust="qfq")
-        if df is not None and not df.empty:
-            # 返回最新收盘价
-            return float(df['close'].iloc[-1])
+        # 方法2: 如果方法1失败，尝试获取历史数据
+        try:
+            df = ak.fund_etf_hist_sina(symbol=full_code, period="daily", adjust="qfq")
+            if df is not None and not df.empty:
+                # 返回最新收盘价
+                return float(df['close'].iloc[-1])
+        except:
+            pass
+            
     except Exception as e:
         # 静默失败，返回 None
         pass
