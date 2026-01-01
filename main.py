@@ -232,12 +232,28 @@ def get_price_from_akshare(ticker_symbol, spot_cache=None, etf_cache=None):
             except:
                 pass
         
-        # 方法5: 尝试使用基金净值接口
+        # 方法5: 尝试使用ETF基金净值接口
         try:
             df = ak.fund_etf_fund_info_em(fund=ticker_symbol, indicator="单位净值走势")
             if df is not None and not df.empty:
                 # 获取最新净值
                 for field in ['净值', '单位净值', 'nav']:
+                    if field in df.columns:
+                        nav = df[field].iloc[-1]
+                        if nav is not None:
+                            try:
+                                return float(nav)
+                            except:
+                                continue
+        except:
+            pass
+
+        # 方法5b: 尝试使用开放式基金净值走势 (针对 00xxxx 等)
+        try:
+            df = ak.fund_open_fund_info_em(fund=ticker_symbol, indicator="单位净值走势")
+            if df is not None and not df.empty:
+                # 字段通常是 'x' (日期), 'y' (净值)
+                for field in ['y', 'nav', '单位净值']:
                     if field in df.columns:
                         nav = df[field].iloc[-1]
                         if nav is not None:
