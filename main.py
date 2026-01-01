@@ -4,6 +4,14 @@ import datetime
 import yfinance as yf
 from notion_client import Client
 
+# 尝试导入 akshare（用于获取中国ETF基金数据）
+try:
+    import akshare as ak
+    AKSHARE_AVAILABLE = True
+except ImportError:
+    AKSHARE_AVAILABLE = False
+    print("⚠️ akshare 未安装，将跳过中国ETF基金数据获取（可选安装: pip install akshare）")
+
 # --- 环境变量配置 (CI/CD 注入) ---
 # 本地测试时，可以在终端 export 或者直接把字符串填在这里测试(测试完记得删掉)
 NOTION_TOKEN = os.getenv("NOTION_TOKEN")
@@ -62,6 +70,39 @@ def auto_detect_currency(ticker_name):
         return "HKD"  # 港股
     else:
         return "USD"  # 美股/加密货币/默认
+
+def get_price_from_akshare(ticker_symbol):
+    """
+    使用 akshare 获取中国ETF基金价格（备选数据源）
+    适用于 yfinance 无法获取的基金代码（如 512800, 512890 等）
+    """
+    if not AKSHARE_AVAILABLE:
+        return None
+    
+    try:
+        # 判断是上海还是深圳
+        if ticker_symbol.startswith('51') or ticker_symbol.startswith('50'):
+            # 上海ETF基金
+            market = "sh"
+        elif ticker_symbol.startswith('15') or ticker_symbol.startswith('16'):
+            # 深圳ETF基金
+            market = "sz"
+        else:
+            return None
+        
+        # 构建完整的代码（如 sh512800）
+        full_code = f"{market}{ticker_symbol}"
+        
+        # 使用 akshare 获取实时行情
+        df = ak.fund_etf_hist_sina(symbol=full_code, period="daily", adjust="qfq")
+        if df is not None and not df.empty:
+            # 返回最新收盘价
+            return float(df['close'].iloc[-1])
+    except Exception as e:
+        # 静默失败，返回 None
+        pass
+    
+    return None
 
 def update_portfolio():
     # 1. 获取汇率
@@ -147,16 +188,33 @@ def update_portfolio():
             
             # 尝试多种方式获取价格
             current_price = None
+            
+            # 方法1: 使用 yfinance 的 fast_info
             try:
                 current_price = stock.fast_info.last_price
             except:
+                pass
+            
+            # 方法2: 如果 fast_info 失败，尝试获取历史数据
+            if current_price is None:
                 try:
-                    # 如果 fast_info 失败，尝试获取历史数据
                     hist = stock.history(period="1d")
                     if not hist.empty:
                         current_price = hist['Close'].iloc[-1]
                 except:
                     pass
+            
+            # 方法3: 如果是中国ETF基金代码且yfinance失败，尝试使用akshare
+            if current_price is None and calc_currency == "CNY":
+                # 检查是否是ETF基金代码（通常以5开头）
+                if ticker_symbol.isdigit() and (ticker_symbol.startswith('5') or ticker_symbol.startswith('1')):
+                    try:
+                        akshare_price = get_price_from_akshare(ticker_symbol)
+                        if akshare_price:
+                            current_price = akshare_price
+                            print(f" [使用akshare]", end="", flush=True)
+                    except:
+                        pass
             
             # 如果仍然无法获取价格，抛出异常
             if current_price is None or (isinstance(current_price, float) and current_price == 0):

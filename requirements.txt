@@ -1,3 +1,4 @@
 notion-client>=2.2.1
 yfinance>=0.2.28
+akshare>=1.12.0
 
