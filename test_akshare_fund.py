@@ -1,5 +1,6 @@
 import time
 import akshare as ak
+import pandas as pd
 
 def test_fund_speed(symbol):
     print(f"🚀 Testing fetching speed for Fund Code: {symbol} ...")
@@ -10,9 +11,19 @@ def test_fund_speed(symbol):
     try:
         df = ak.fund_open_fund_daily_em(symbol=symbol)
         success = df is not None and not df.empty
+        price = None
+        if success:
+            # Try to extract price
+            for field in ['单位净值', 'nav']:
+                if field in df.columns:
+                    price = df[field].iloc[-1]
+                    break
+        
         print(f"1. [fund_open_fund_daily_em] Time: {time.time() - start:.4f}s | Success: {success}")
         if success:
-            print(f"   -> Latest Data: {df.iloc[-1].to_dict()}")
+            print(f"   -> Columns: {df.columns.tolist()}")
+            print(f"   -> Latest Price: {price}")
+            print(f"   -> Latest Row: {df.iloc[-1].to_dict()}")
     except Exception as e:
         print(f"1. [fund_open_fund_daily_em] Time: {time.time() - start:.4f}s | Error: {e}")
 
@@ -23,7 +34,17 @@ def test_fund_speed(symbol):
     try:
         df = ak.fund_open_fund_info_em(fund=symbol, indicator="单位净值走势")
         success = df is not None and not df.empty
+        price = None
+        if success:
+            for field in ['y', 'nav', '单位净值']:
+                if field in df.columns:
+                    price = df[field].iloc[-1]
+                    break
+
         print(f"2. [fund_open_fund_info_em]  Time: {time.time() - start:.4f}s | Success: {success}")
+        if success:
+            print(f"   -> Columns: {df.columns.tolist()}")
+            print(f"   -> Latest Price: {price}")
     except Exception as e:
         print(f"2. [fund_open_fund_info_em]  Time: {time.time() - start:.4f}s | Error: {e}")
 
@@ -40,6 +61,8 @@ def test_fund_speed(symbol):
         df = ak.fund_etf_hist_em(symbol=symbol, period="daily", start_date=start_date, end_date=end_date)
         success = df is not None and not df.empty
         print(f"3. [fund_etf_hist_em]        Time: {time.time() - start:.4f}s | Success: {success}")
+        if success:
+            print(f"   -> Columns: {df.columns.tolist()}")
     except Exception as e:
         print(f"3. [fund_etf_hist_em]        Time: {time.time() - start:.4f}s | Error: {e}")
 

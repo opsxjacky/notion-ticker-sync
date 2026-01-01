@@ -282,35 +282,36 @@ def get_price_from_akshare(ticker_symbol, spot_cache=None, etf_cache=None):
         except:
             pass
 
-        # 方法6: 尝试作为开放式基金获取净值 (如果不是0开头，或者上面0开头逻辑失败)
-        if not ticker_symbol.startswith('0'):
-            try:
-                df = ak.fund_open_fund_daily_em(symbol=ticker_symbol)
-                if df is not None and not df.empty:
-                    for field in ['单位净值', 'nav']:
-                        if field in df.columns:
-                            nav = df[field].iloc[-1]
-                            if nav is not None:
-                                try:
-                                    return float(nav)
-                                except:
-                                    continue
-            except:
-                pass
-            
-            try:
-                df = ak.fund_open_fund_info_em(fund=ticker_symbol, indicator="单位净值走势")
-                if df is not None and not df.empty:
-                    for field in ['y', 'nav', '单位净值']:
-                        if field in df.columns:
-                            nav = df[field].iloc[-1]
-                            if nav is not None:
-                                try:
-                                    return float(nav)
-                                except:
-                                    continue
-            except:
-                pass
+        # 方法6: 尝试作为开放式基金获取净值 (通用兜底，不限制代码前缀)
+        # 即使上面针对0开头尝试过，如果失败了，这里作为最后的兜底再试一次也无妨
+        # 且对于非0开头的开放式基金（极少见但可能存在），这里是唯一入口
+        try:
+            df = ak.fund_open_fund_daily_em(symbol=ticker_symbol)
+            if df is not None and not df.empty:
+                for field in ['单位净值', 'nav']:
+                    if field in df.columns:
+                        nav = df[field].iloc[-1]
+                        if nav is not None:
+                            try:
+                                return float(nav)
+                            except:
+                                continue
+        except:
+            pass
+        
+        try:
+            df = ak.fund_open_fund_info_em(fund=ticker_symbol, indicator="单位净值走势")
+            if df is not None and not df.empty:
+                for field in ['y', 'nav', '单位净值']:
+                    if field in df.columns:
+                        nav = df[field].iloc[-1]
+                        if nav is not None:
+                            try:
+                                return float(nav)
+                            except:
+                                continue
+        except:
+            pass
         
         # 方法7: 尝试作为货币基金获取净值 (针对货币基金)
         try:
