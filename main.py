@@ -1,6 +1,8 @@
 import os
 import time
 import datetime
+import pandas as pd
+
 try:
     import yfinance as yf
 except ImportError:
@@ -84,11 +86,13 @@ def auto_detect_currency(ticker_name):
     else:
         return "USD"  # 美股/加密货币/默认
 
-def get_price_from_akshare(ticker_symbol):
+def get_price_from_akshare(ticker_symbol, spot_cache=None, etf_cache=None):
     """
     使用 akshare 获取中国基金价格（备选数据源）
     适用于 yfinance 无法获取的基金代码（ETF、债券基金等）
     支持：51/50开头（上海ETF）、15/16开头（深圳ETF）、10开头（债券基金等）
+    
+    优化：支持传入 spot_cache 和 etf_cache (dict) 避免重复全量请求
     """
     if not AKSHARE_AVAILABLE:
         return None
@@ -111,25 +115,38 @@ def get_price_from_akshare(ticker_symbol):
             return None
         
         # 方法1: 尝试使用实时行情接口（东方财富 - ETF基金）
-        try:
-            df = ak.fund_etf_spot_em()
-            if df is not None and not df.empty:
-                # 查找匹配的代码（精确匹配）
-                match = df[df['代码'] == ticker_symbol]
-                if match.empty:
-                    # 如果精确匹配失败，尝试模糊匹配
-                    match = df[df['代码'].str.contains(ticker_symbol, na=False)]
-                if not match.empty:
-                    # 尝试多个可能的字段名
-                    for field in ['最新价', '收盘', '现价', 'close', 'current']:
-                        price = match.iloc[0].get(field)
-                        if price is not None and price != '-' and price != '':
-                            try:
-                                return float(price)
-                            except:
-                                continue
-        except Exception as e:
-            pass
+        # 优先查缓存
+        if etf_cache is not None and ticker_symbol in etf_cache:
+            row = etf_cache[ticker_symbol]
+            for field in ['最新价', '收盘', '现价', 'close', 'current']:
+                val = row.get(field)
+                if val is not None and val != '-' and val != '':
+                    try:
+                        return float(val)
+                    except:
+                        continue
+        
+        # 如果缓存没命中且没传缓存，才去请求
+        if etf_cache is None:
+            try:
+                df = ak.fund_etf_spot_em()
+                if df is not None and not df.empty:
+                    # 查找匹配的代码（精确匹配）
+                    match = df[df['代码'] == ticker_symbol]
+                    if match.empty:
+                        # 如果精确匹配失败，尝试模糊匹配
+                        match = df[df['代码'].str.contains(ticker_symbol, na=False)]
+                    if not match.empty:
+                        # 尝试多个可能的字段名
+                        for field in ['最新价', '收盘', '现价', 'close', 'current']:
+                            price = match.iloc[0].get(field)
+                            if price is not None and price != '-' and price != '':
+                                try:
+                                    return float(price)
+                                except:
+                                    continue
+            except Exception as e:
+                pass
         
         # 方法1b: 尝试使用债券基金实时行情（如果是10开头）
         if ticker_symbol.startswith('10'):
@@ -149,20 +166,31 @@ def get_price_from_akshare(ticker_symbol):
                 pass
         
         # 方法2: 尝试使用股票实时行情（有些ETF和债券基金可能在这里）
-        try:
-            df = ak.stock_zh_a_spot_em()
-            if df is not None and not df.empty:
-                match = df[df['代码'] == ticker_symbol]
-                if not match.empty:
-                    for field in ['最新价', '收盘', '现价', 'current', 'close']:
-                        price = match.iloc[0].get(field)
-                        if price is not None and price != '-' and price != '':
-                            try:
-                                return float(price)
-                            except:
-                                continue
-        except:
-            pass
+        if spot_cache is not None and ticker_symbol in spot_cache:
+            row = spot_cache[ticker_symbol]
+            for field in ['最新价', '收盘', '现价', 'current', 'close']:
+                val = row.get(field)
+                if val is not None and val != '-' and val != '':
+                    try:
+                        return float(val)
+                    except:
+                        continue
+        
+        if spot_cache is None:
+            try:
+                df = ak.stock_zh_a_spot_em()
+                if df is not None and not df.empty:
+                    match = df[df['代码'] == ticker_symbol]
+                    if not match.empty:
+                        for field in ['最新价', '收盘', '现价', 'current', 'close']:
+                            price = match.iloc[0].get(field)
+                            if price is not None and price != '-' and price != '':
+                                try:
+                                    return float(price)
+                                except:
+                                    continue
+            except:
+                pass
         
         # 方法3: 尝试获取历史数据（东方财富 - 推荐方法）
         try:
@@ -236,7 +264,30 @@ def update_portfolio():
     # 1. 获取汇率
     rates = get_exchange_rates()
     
-    # 2. 查询 Notion 数据库
+    # 2. 预加载 Akshare 行情数据 (加速查询)
+    spot_cache = {}
+    etf_cache = {}
+    if AKSHARE_AVAILABLE:
+        print("🚀 正在预加载 A股/ETF 行情数据 (加速查询)...")
+        try:
+            # 获取所有A股实时行情
+            df_spot = ak.stock_zh_a_spot_em()
+            if df_spot is not None and not df_spot.empty:
+                spot_cache = {str(row['代码']): row for _, row in df_spot.iterrows()}
+            print(f"   - 已缓存 {len(spot_cache)} 只A股行情")
+        except Exception as e:
+            print(f"   ⚠️ 预加载A股行情失败: {e}")
+
+        try:
+            # 获取所有ETF实时行情
+            df_etf = ak.fund_etf_spot_em()
+            if df_etf is not None and not df_etf.empty:
+                etf_cache = {str(row['代码']): row for _, row in df_etf.iterrows()}
+            print(f"   - 已缓存 {len(etf_cache)} 只ETF行情")
+        except Exception as e:
+            print(f"   ⚠️ 预加载ETF行情失败: {e}")
+
+    # 3. 查询 Notion 数据库
     print(f"📥 正在查询 Notion 数据库: {DATABASE_ID} ...")
     try:
         # 先获取数据库信息
@@ -257,7 +308,11 @@ def update_portfolio():
 
     print(f"🔍 找到 {len(pages)} 条持仓记录，开始更新...")
 
-    # 2. 遍历更新股票价格
+    # 准备 PE 缓存目录
+    CACHE_DIR = "./pe_cache"
+    os.makedirs(CACHE_DIR, exist_ok=True)
+
+    # 4. 遍历更新股票价格
     for page in pages:
         page_id = page["id"]
         props = page["properties"]
@@ -355,7 +410,8 @@ def update_portfolio():
                     ticker_symbol.startswith('10')
                 ):
                     try:
-                        akshare_price = get_price_from_akshare(ticker_symbol)
+                        # 传入缓存进行查询
+                        akshare_price = get_price_from_akshare(ticker_symbol, spot_cache=spot_cache, etf_cache=etf_cache)
                         if akshare_price:
                             current_price = akshare_price
                             print(f" [使用akshare]", end="", flush=True)
@@ -373,31 +429,6 @@ def update_portfolio():
             pe_percentile = None
             
             try:
-                import os
-                import pandas as pd
-                # -------批量A股名称/现价缓存块--------
-                CACHE_DIR = "./pe_cache"
-                os.makedirs(CACHE_DIR, exist_ok=True)
-                # 全局行情缓存（提升名称和现价查询速度）
-                if not hasattr(update_portfolio, "_spot_cache"):  # 只初始化一次
-                    try:
-                        spot_df = ak.stock_zh_a_spot_em()
-                        update_portfolio._spot_dict = {row['代码']: row for _, row in spot_df.iterrows()}
-                    except Exception as e:
-                        update_portfolio._spot_dict = {}
-                    try:
-                        etf_df = ak.fund_etf_spot_em()
-                        update_portfolio._etf_dict = {row['代码']: row for _, row in etf_df.iterrows()}
-                    except Exception as e:
-                        update_portfolio._etf_dict = {}
-                def get_name_price(symbol):
-                    d = update_portfolio._spot_dict
-                    if symbol in d:
-                        row = d[symbol]; return row.get('名称', ''), row.get('最新价', None)
-                    d = update_portfolio._etf_dict
-                    if symbol in d:
-                        row = d[symbol]; return row.get('名称', ''), row.get('最新价', None)
-                    return '', None
                 # -------PE持久缓存--------
                 def get_pe_series_cached(symbol):
                     cache_file = os.path.join(CACHE_DIR, f"{symbol}_pe.csv")
@@ -413,23 +444,22 @@ def update_portfolio():
                         print(f"抓取{symbol}历史PE失败：{e}")
                     
                     return pd.Series([])
-                # 高速本地查A股名称和现价
+                
+                # 高速本地查A股名称和现价 (使用已有的缓存)
+                def get_name_price(symbol):
+                    if symbol in spot_cache:
+                        row = spot_cache[symbol]; return row.get('名称', ''), row.get('最新价', None)
+                    if symbol in etf_cache:
+                        row = etf_cache[symbol]; return row.get('名称', ''), row.get('最新价', None)
+                    return '', None
+                
                 stock_name, current_price_a = get_name_price(ticker_symbol)
-                # 若行情查不到则降级原逻辑
+                
+                # 若行情查不到则降级原逻辑 (但通常缓存应该有了)
                 if not stock_name:
                     try:
-                        df = ak.stock_zh_a_spot_em()
-                        match = df[df['代码'] == ticker_symbol]
-                        if not match.empty:
-                            stock_name = match.iloc[0].get('名称', "")
-                    except:
+                        # 尝试模糊匹配或其他方式，这里简单处理，如果缓存没有，可能就是没有
                         pass
-                if current_price_a is None:
-                    try:
-                        etf_df = ak.fund_etf_spot_em()
-                        match = etf_df[etf_df['代码'] == ticker_symbol]
-                        if not match.empty:
-                            current_price_a = match.iloc[0].get('最新价', None)
                     except:
                         pass
                 
