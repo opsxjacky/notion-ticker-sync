@@ -135,13 +135,13 @@ def get_price_from_akshare(ticker_symbol):
             except:
                 pass
         
-        # 方法2: 尝试使用股票实时行情（有些ETF可能在这里）
+        # 方法2: 尝试使用股票实时行情（有些ETF和债券基金可能在这里）
         try:
             df = ak.stock_zh_a_spot_em()
             if df is not None and not df.empty:
                 match = df[df['代码'] == ticker_symbol]
                 if not match.empty:
-                    for field in ['最新价', '收盘', '现价']:
+                    for field in ['最新价', '收盘', '现价', 'current', 'close']:
                         price = match.iloc[0].get(field)
                         if price is not None and price != '-' and price != '':
                             try:
