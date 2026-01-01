@@ -62,6 +62,42 @@ CRYPTO_SYMBOLS = {
     'SNX', 'SUSHI', 'YFI', '1INCH', 'BAT', 'ZRX', 'LINK', 'GRT'
 }
 
+# ETF到指数的映射表（用于获取指数PE作为ETF估值参考）
+ETF_INDEX_MAPPING = {
+    # 沪深300系列
+    '510300': '000300',  # 沪深300ETF → 沪深300指数
+    '159919': '000300',  # 沪深300ETF → 沪深300指数
+    '510330': '000300',  # 沪深300ETF → 沪深300指数
+
+    # 中证500系列
+    '510500': '000905',  # 中证500ETF → 中证500指数
+    '159922': '000905',  # 中证500ETF → 中证500指数
+
+    # 上证50系列
+    '510050': '000016',  # 上证50ETF → 上证50指数
+    '510710': '000016',  # 上证50ETF → 上证50指数
+
+    # 科创50系列
+    '588000': '000688',  # 科创50ETF → 科创50指数
+    '588080': '000688',  # 科创50ETF → 科创50指数
+
+    # 创业板系列
+    '159915': '399006',  # 创业板ETF → 创业板指
+    '159949': '399006',  # 创业板ETF → 创业板指
+
+    # 红利系列
+    '510880': '000922',  # 红利ETF → 中证红利指数
+
+    # 券商系列
+    '512000': '399975',  # 券商ETF → 证券公司指数
+    '512880': '399975',  # 券商ETF → 证券公司指数
+
+    # 银行系列
+    '512800': '399986',  # 银行ETF → 中证银行指数
+
+    # 其他行业ETF可以继续添加...
+}
+
 # PE 缓存目录
 CACHE_DIR = "./pe_cache"
 # Akshare 数据缓存目录
@@ -243,35 +279,27 @@ def get_price_from_akshare(ticker_symbol, spot_cache=None, etf_cache=None):
         # --- 优化：针对 0 开头的代码（通常是开放式基金），优先尝试开放式基金接口 ---
         # 如果上面的 spot_cache (股票) 没命中，且是 0 开头，很大概率是场外基金
         if ticker_symbol.startswith('0'):
-            # 优先尝试：开放式基金净值 (针对 00xxxx 等场外基金)
+            # 场外基金：使用 fund_open_fund_info_em 获取净值走势（注意：参数名是 symbol 不是 fund）
             try:
-                df = ak.fund_open_fund_daily_em(symbol=ticker_symbol)
+                df = ak.fund_open_fund_info_em(symbol=ticker_symbol, indicator="单位净值走势")
                 if df is not None and not df.empty:
-                    for field in ['单位净值', 'nav']:
+                    # 尝试多个可能的字段名
+                    for field in ['净值', 'y', 'nav', '单位净值']:
                         if field in df.columns:
                             nav = df[field].iloc[-1]
-                            if nav is not None:
+                            if nav is not None and str(nav) != 'nan':
                                 try:
-                                    return float(nav)
+                                    price = float(nav)
+                                    print(f"      [场外基金] 从 fund_open_fund_info_em 获取净值: {price}")
+                                    return price
                                 except:
                                     continue
-            except:
-                pass
-            
-            # 其次尝试：开放式基金净值走势
-            try:
-                df = ak.fund_open_fund_info_em(fund=ticker_symbol, indicator="单位净值走势")
-                if df is not None and not df.empty:
-                    for field in ['y', 'nav', '单位净值']:
-                        if field in df.columns:
-                            nav = df[field].iloc[-1]
-                            if nav is not None:
-                                try:
-                                    return float(nav)
-                                except:
-                                    continue
-            except:
-                pass
+                    print(f"      [场外基金] fund_open_fund_info_em 数据字段: {df.columns.tolist()}")
+                    print(f"      [场外基金] 未找到有效净值字段")
+                else:
+                    print(f"      [场外基金] fund_open_fund_info_em 返回空数据")
+            except Exception as e:
+                print(f"      [场外基金] fund_open_fund_info_em 失败: {e}")
 
         # 方法3: 尝试获取历史数据（东方财富 - 推荐方法）
         # 注意：对于场外基金，这个接口可能很慢或不支持，所以放在后面
@@ -438,6 +466,176 @@ def get_pe_series_cached(symbol):
         print(f"抓取{symbol}历史PE失败：{e}")
     
     return pd.Series([])
+
+
+def get_etf_index_pe_pb(etf_code):
+    """
+    获取ETF对应指数的PE、PB和PE/PB百分位
+    参数：
+        etf_code: ETF代码，如'510300'
+    返回：
+        (pe, pb, pe_percentile, pb_percentile) 四元组
+    """
+    if not AKSHARE_AVAILABLE:
+        return None, None, None, None
+
+    # 检查是否有映射
+    index_code = ETF_INDEX_MAPPING.get(etf_code)
+    if not index_code:
+        return None, None, None, None
+
+    pe = None
+    pb = None
+    pe_percentile = None
+    pb_percentile = None
+
+    # === 1. 获取PE和PE百分位（使用10年数据）===
+    try:
+        from datetime import datetime, timedelta
+        # 获取10年历史数据
+        end_date = datetime.now().strftime('%Y%m%d')
+        start_date = (datetime.now() - timedelta(days=3650)).strftime('%Y%m%d')  # 10年前
+
+        df = ak.stock_zh_index_hist_csindex(symbol=index_code, start_date=start_date, end_date=end_date)
+        if df is not None and not df.empty:
+            latest = df.iloc[-1]
+            pe = latest.get('滚动市盈率')
+            if pe is not None:
+                try:
+                    pe = float(pe)
+                except:
+                    pe = None
+
+            # 计算PE百分位（10年数据）
+            if pe is not None and '滚动市盈率' in df.columns:
+                try:
+                    pe_series = df['滚动市盈率'].dropna()
+                    if len(pe_series) > 0:
+                        years = len(pe_series) / 252  # 约252个交易日/年
+                        pe_percentile = float((pe_series < pe).sum()) / len(pe_series) * 100
+                        print(f"      [指数PE] PE={pe:.2f}, 百分位={pe_percentile:.2f}% (基于{years:.1f}年数据)")
+                except Exception as e:
+                    print(f"      [指数PE百分位] 计算失败: {e}")
+    except Exception as e:
+        print(f"      [指数PE] 获取失败: {e}")
+
+    # === 2. 获取PB和PB百分位 ===
+    try:
+        # 获取沪深300等主要指数的PB数据
+        index_name_map = {
+            '000300': '沪深300',
+            '000905': '中证500',
+            '000016': '上证50',
+            # 其他指数暂时不支持PB
+        }
+        index_name = index_name_map.get(index_code)
+
+        if index_name:
+            df_pb = ak.stock_index_pb_lg(symbol=index_name)
+            if df_pb is not None and not df_pb.empty:
+                latest_pb = df_pb.iloc[-1]['市净率']
+                if latest_pb is not None:
+                    try:
+                        pb = float(latest_pb)
+
+                        # 计算PB百分位
+                        pb_series = df_pb['市净率'].dropna()
+                        if len(pb_series) > 0:
+                            years = len(pb_series) / 252
+                            pb_percentile = float((pb_series < pb).sum()) / len(pb_series) * 100
+                            print(f"      [指数PB] PB={pb:.2f}, 百分位={pb_percentile:.2f}% (基于{years:.1f}年数据)")
+                    except Exception as e:
+                        print(f"      [指数PB] 解析失败: {e}")
+    except Exception as e:
+        pass  # PB数据不是所有指数都有，失败不影响PE
+
+    return pe, pb, pe_percentile, pb_percentile
+
+
+def get_pb_ratio(ticker_symbol, calc_currency, stock):
+    """
+    获取市净率（PB）
+    参数：
+        ticker_symbol: 股票/ETF代码
+        calc_currency: 货币类型
+        stock: yfinance Ticker对象（可选）
+    返回：
+        pb: 市净率，如果无法获取则返回 None
+    """
+    pb_ratio = None
+
+    # 方法1: 从yfinance获取（适用于美股、港股）
+    if stock and calc_currency in ['USD', 'HKD']:
+        try:
+            stock_info = stock.info
+            pb_ratio = stock_info.get('priceToBook')
+            if pb_ratio is not None:
+                try:
+                    pb_ratio = float(pb_ratio)
+                    print(f"      [yfinance] 获取PB: {pb_ratio:.2f}")
+                except:
+                    pb_ratio = None
+        except Exception as e:
+            pass
+
+    # 方法2: 对于A股ETF，如果有指数映射，可以尝试获取指数PB
+    # （目前akshare的中证指数接口不提供PB，这里预留扩展）
+
+    return pb_ratio
+
+
+def calculate_fund_nav_growth(fund_code):
+    """
+    计算基金净值增长率
+    参数：
+        fund_code: 基金代码，如'003847'
+    返回：
+        dict: {'1m': 增长率%, '3m': 增长率%, '6m': 增长率%, '1y': 增长率%}
+        如果无法计算则返回空字典
+    """
+    if not AKSHARE_AVAILABLE:
+        return {}
+
+    # 只处理场外基金（0开头的6位数字）
+    if not (fund_code.startswith('0') and len(fund_code) == 6 and fund_code.isdigit()):
+        return {}
+
+    try:
+        import pandas as pd
+        from datetime import datetime, timedelta
+
+        df = ak.fund_open_fund_info_em(symbol=fund_code, indicator='单位净值走势')
+        if df is None or df.empty:
+            return {}
+
+        df['净值日期'] = pd.to_datetime(df['净值日期'])
+        latest = df.iloc[-1]
+        latest_date = latest['净值日期']
+        latest_nav = float(latest['单位净值'])
+
+        periods = [
+            (30, '1m'),
+            (90, '3m'),
+            (180, '6m'),
+            (365, '1y'),
+        ]
+
+        growth_rates = {}
+        for days, label in periods:
+            target_date = latest_date - timedelta(days=days)
+            past_data = df[df['净值日期'] <= target_date]
+            if not past_data.empty:
+                past_nav = float(past_data.iloc[-1]['单位净值'])
+                growth = (latest_nav - past_nav) / past_nav * 100
+                growth_rates[label] = round(growth, 2)
+
+        if growth_rates:
+            print(f"      [基金] 净值增长率: {growth_rates}")
+
+        return growth_rates
+    except Exception as e:
+        print(f"      [基金] 净值增长率计算失败: {e}")
+        return {}
 
 
 def get_name_price(symbol, currency, spot_cache, etf_cache, hk_cache, open_fund_cache):
@@ -659,13 +857,16 @@ def update_portfolio():
                 # 检查是否是基金代码（只要是6位数字，都尝试去查，包括00开头的场外基金）
                 if ticker_symbol.isdigit() and len(ticker_symbol) == 6:
                     try:
+                        print(f"\n   [尝试akshare获取 {ticker_symbol}]")
                         # 传入缓存进行查询
                         akshare_price = get_price_from_akshare(ticker_symbol, spot_cache=spot_cache, etf_cache=etf_cache)
                         if akshare_price:
                             current_price = akshare_price
-                            print(f" [使用akshare]", end="", flush=True)
-                    except:
-                        pass
+                            print(f" [使用akshare成功: {akshare_price}]", end="", flush=True)
+                        else:
+                            print(f"   [akshare返回None]")
+                    except Exception as e:
+                        print(f"   [akshare异常: {e}]")
             
             # 方法4: 如果是港股且yfinance失败，尝试使用akshare
             if (current_price is None or (isinstance(current_price, (int, float)) and current_price == 0)) and calc_currency == "HKD":
@@ -733,16 +934,21 @@ def update_portfolio():
                             if val is not None:
                                 try:
                                     pe_ratio = float(val)
+                                    print(f"      [A股] 从spot_cache获取PE: {pe_ratio}")
                                 except:
                                     pass
-                        # 检查 ETF etf_cache (虽然通常没有，但以防万一)
+                        # 检查 ETF etf_cache
                         if pe_ratio is None and ticker_symbol in etf_cache:
+                            # 注意：大多数ETF本身没有PE，但可以尝试查找
                             val = etf_cache[ticker_symbol].get('市盈率-动态') or etf_cache[ticker_symbol].get('市盈率')
-                            if val is not None:
+                            if val is not None and val != '-' and str(val) != 'nan':
                                 try:
                                     pe_ratio = float(val)
-                                except:
-                                    pass
+                                    print(f"      [ETF] 从etf_cache获取PE: {pe_ratio}")
+                                except Exception as e:
+                                    print(f"      [ETF] PE转换失败: {val}, 错误: {e}")
+                            else:
+                                print(f"      [ETF] {ticker_symbol} 缓存中无PE数据（ETF通常无PE指标）")
 
                 # 尝试获取港股 PE (从 Akshare 缓存)
                 if calc_currency == 'HKD':
@@ -785,19 +991,31 @@ def update_portfolio():
                                     pe_ratio = None
                         
                         # 如果 PE 百分位未获取到，则从 yfinance 计算
-                        if pe_percentile is None:
+                        if pe_percentile is None and pe_ratio is not None and pe_ratio > 0:
                             try:
                                 hist = stock.history(period="5y", interval="1mo")
-                                if hist is not None and not hist.empty and pe_ratio is not None and pe_ratio > 0:
-                                    # 使用 info 的 trailingEps 作为近似，即所有历史点都用这个最新eps，近似即可
+                                if hist is not None and not hist.empty:
+                                    # 方法1: 使用 trailingEps（如果有）
                                     trailing_eps = stock_info.get("trailingEps")
                                     if trailing_eps is not None and trailing_eps != 0:
                                         hist_pe_ratios = hist['Close'] / float(trailing_eps)
                                         hist_pe_ratios = hist_pe_ratios[hist_pe_ratios > 0]
                                         if not hist_pe_ratios.empty:
                                             pe_percentile = float(np.sum(hist_pe_ratios < pe_ratio)) / len(hist_pe_ratios) * 100
+                                            print(f"      [美股] 计算PE百分位(用EPS): {pe_percentile:.2f}%")
+                                    else:
+                                        # 方法2: 如果没有EPS，使用当前价格和PE反推EPS，然后计算历史PE
+                                        # EPS = 当前价格 / 当前PE
+                                        current_price_for_calc = hist['Close'].iloc[-1]
+                                        if current_price_for_calc > 0:
+                                            estimated_eps = current_price_for_calc / pe_ratio
+                                            hist_pe_ratios = hist['Close'] / estimated_eps
+                                            hist_pe_ratios = hist_pe_ratios[hist_pe_ratios > 0]
+                                            if not hist_pe_ratios.empty:
+                                                pe_percentile = float(np.sum(hist_pe_ratios < pe_ratio)) / len(hist_pe_ratios) * 100
+                                                print(f"      [美股] 计算PE百分位(估算EPS): {pe_percentile:.2f}%")
                             except Exception as e:
-                                pass
+                                print(f"      [美股] PE百分位计算失败: {e}")
                             # yfinance 无法直接获取中国A股和无季报历史EPS，港美股可用该方法
                     except:
                         pass
@@ -826,10 +1044,41 @@ def update_portfolio():
             # 更新 PE 和 PE 百分位 (如果获取不到则清空)
             update_props["PE"] = {"number": round(pe_ratio, 2) if pe_ratio is not None else None}
             update_props["PE百分位"] = {"number": round(pe_percentile, 2) if pe_percentile is not None else None}
-            
+
+            # === 新增：获取PB市净率 ===
+            pb_ratio = get_pb_ratio(ticker_symbol, calc_currency, stock)
+            if pb_ratio is not None:
+                update_props["PB"] = {"number": round(pb_ratio, 2)}
+
+            # === 新增：对于A股ETF，尝试获取对应指数的PE/PB和百分位（作为估值参考）===
+            if calc_currency == "CNY" and pe_ratio is None and ticker_symbol in ETF_INDEX_MAPPING:
+                index_pe, index_pb, index_pe_percentile, index_pb_percentile = get_etf_index_pe_pb(ticker_symbol)
+                if index_pe is not None:
+                    index_name = ETF_INDEX_MAPPING.get(ticker_symbol, '')
+                    print(f"      [ETF] 使用指数({index_name})")
+                    # 使用指数PE作为ETF的参考PE
+                    update_props["PE"] = {"number": round(index_pe, 2)}
+                    # 如果有PE百分位，也更新
+                    if index_pe_percentile is not None:
+                        pe_percentile = index_pe_percentile
+                        update_props["PE百分位"] = {"number": round(index_pe_percentile, 2)}
+                    # 如果有指数PB，也更新
+                    if index_pb is not None and pb_ratio is None:
+                        pb_ratio = index_pb
+                        update_props["PB"] = {"number": round(index_pb, 2)}
+
+            # === 新增：对于场外基金，计算净值增长率 ===
+            growth_rates = {}
+            if ticker_symbol.startswith('0') and len(ticker_symbol) == 6 and ticker_symbol.isdigit():
+                growth_rates = calculate_fund_nav_growth(ticker_symbol)
+                # 计算增长率仅用于日志输出，不写入Notion
+                # 如果需要写入，请在Notion添加"年化收益"字段并取消下面的注释：
+                # if growth_rates and '1y' in growth_rates:
+                #     update_props["年化收益"] = {"number": round(growth_rates['1y'], 2)}
+
             # 如果 Notion 数据库中有"最后更新时间"字段，取消下面的注释并修改字段名
             # update_props["最后更新时间"] = {"date": {"start": datetime.datetime.now().isoformat()}}
-            
+
             notion.pages.update(
                 page_id=page_id,
                 properties=update_props
@@ -840,6 +1089,10 @@ def update_portfolio():
                 log_message += f" | PE: {pe_ratio:.2f}"
             if pe_percentile is not None:
                 log_message += f" | PE百分位: {pe_percentile:.2f}%"
+            if pb_ratio is not None:
+                log_message += f" | PB: {pb_ratio:.2f}"
+            if ticker_symbol.startswith('0') and len(ticker_symbol) == 6 and growth_rates and '1y' in growth_rates:
+                log_message += f" | 年化: {growth_rates['1y']:.2f}%"
 
             print(f" ✅ 成功 ({log_message})")
             
