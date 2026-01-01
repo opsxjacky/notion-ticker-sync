@@ -21,7 +21,7 @@ if not NOTION_TOKEN or not DATABASE_ID:
     raise ValueError("❌ 错误: 未找到 NOTION_TOKEN 或 DATABASE_ID 环境变量")
 
 # 初始化 Notion
-notion = Client(auth=NOTION_TOKEN)
+notion = Client(auth=NOTION_TOKEN, notion_version="2025-09-03")
 
 # 常见数字货币代码列表（需要添加 -USD 后缀）
 CRYPTO_SYMBOLS = {
