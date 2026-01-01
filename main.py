@@ -393,7 +393,7 @@ def get_pe_series_cached(symbol):
     return pd.Series([])
 
 
-def get_name_price(symbol, currency, spot_cache, etf_cache, hk_cache):
+def get_name_price(symbol, currency, spot_cache, etf_cache, hk_cache, open_fund_cache):
     """高速本地查A股/港股名称和现价 (使用已有的缓存)"""
     # A股
     if currency == "CNY":
@@ -401,6 +401,9 @@ def get_name_price(symbol, currency, spot_cache, etf_cache, hk_cache):
             row = spot_cache[symbol]; return row.get('名称', ''), row.get('最新价', None)
         if symbol in etf_cache:
             row = etf_cache[symbol]; return row.get('名称', ''), row.get('最新价', None)
+        if symbol in open_fund_cache:
+            # 开放式基金列表没有实时价格，只有名称
+            row = open_fund_cache[symbol]; return row.get('基金简称', ''), None
     # 港股
     if currency == "HKD":
         hk_code = symbol.replace(".HK", "").zfill(5)
@@ -420,6 +423,7 @@ def update_portfolio():
     spot_cache = {}
     etf_cache = {}
     hk_cache = {}
+    open_fund_cache = {}
     
     if AKSHARE_AVAILABLE:
         print("🚀 正在预加载 A股/ETF/港股 行情数据 (加速查询)...")
@@ -449,6 +453,15 @@ def update_portfolio():
             print(f"   - 已缓存 {len(hk_cache)} 只港股行情")
         except Exception as e:
             print(f"   ⚠️ 预加载港股行情失败: {e}")
+            
+        try:
+            # 获取所有开放式基金列表 (用于匹配名称)
+            df_open_fund = ak.fund_name_em()
+            if df_open_fund is not None and not df_open_fund.empty:
+                open_fund_cache = {str(row['基金代码']): row for _, row in df_open_fund.iterrows()}
+            print(f"   - 已缓存 {len(open_fund_cache)} 只开放式基金名称")
+        except Exception as e:
+            print(f"   ⚠️ 预加载开放式基金列表失败: {e}")
 
     # 3. 查询 Notion 数据库
     print(f"📥 正在查询 Notion 数据库: {DATABASE_ID} ...")
@@ -609,7 +622,7 @@ def update_portfolio():
             pe_percentile = None
             
             try:
-                stock_name, current_price_a = get_name_price(ticker_symbol, calc_currency, spot_cache, etf_cache, hk_cache)
+                stock_name, current_price_a = get_name_price(ticker_symbol, calc_currency, spot_cache, etf_cache, hk_cache, open_fund_cache)
                 
                 # 若行情查不到则降级原逻辑 (但通常缓存应该有了)
                 if not stock_name:
@@ -677,25 +690,25 @@ def update_portfolio():
                                 except:
                                     pass
 
-                # 如果 PE 未获取到（非A股或A股获取失败），尝试使用 yfinance
-                if pe_ratio is None:
-                    # 美股/港股等使用yfinance
+                # 尝试使用 yfinance 补充名称、PE、PE百分位
+                if stock:
                     try:
-                        if stock:
-                            stock_info = stock.info
-                            if not stock_name:
-                                stock_name = stock_info.get("shortName", "") or stock_info.get("longName", "")
-                            
-                            import numpy as np
-                            # 获取PE（优先使用trailingPE，如果没有则使用forwardPE）
+                        stock_info = stock.info
+                        if not stock_name:
+                            stock_name = stock_info.get("shortName", "") or stock_info.get("longName", "")
+                        
+                        import numpy as np
+                        # 如果 PE 未获取到，则从 yfinance 获取
+                        if pe_ratio is None:
                             pe_ratio = stock_info.get("trailingPE") or stock_info.get("forwardPE")
                             if pe_ratio is not None:
                                 try:
                                     pe_ratio = float(pe_ratio)
                                 except (ValueError, TypeError):
                                     pe_ratio = None
-                            # 获取PE百分位（基于历史5年1个月的数据）
-                            pe_percentile = None
+                        
+                        # 如果 PE 百分位未获取到，则从 yfinance 计算
+                        if pe_percentile is None:
                             try:
                                 hist = stock.history(period="5y", interval="1mo")
                                 if hist is not None and not hist.empty and pe_ratio is not None and pe_ratio > 0:
@@ -709,7 +722,6 @@ def update_portfolio():
                             except Exception as e:
                                 pass
                             # yfinance 无法直接获取中国A股和无季报历史EPS，港美股可用该方法
-
                     except:
                         pass
             except Exception as e:
