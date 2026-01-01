@@ -17,11 +17,12 @@ except ImportError:
 NOTION_TOKEN = os.getenv("NOTION_TOKEN")
 DATABASE_ID = os.getenv("DATABASE_ID")
 
-if not NOTION_TOKEN or not DATABASE_ID:
-    raise ValueError("❌ 错误: 未找到 NOTION_TOKEN 或 DATABASE_ID 环境变量")
-
-# 初始化 Notion
-notion = Client(auth=NOTION_TOKEN, notion_version="2025-09-03")
+# 初始化 Notion (允许为空，以便单元测试导入此文件时不报错)
+if NOTION_TOKEN and DATABASE_ID:
+    notion = Client(auth=NOTION_TOKEN, notion_version="2025-09-03")
+else:
+    notion = None
+    print("⚠️ 环境变量未设置，Notion 客户端未初始化 (仅供测试或本地开发)")
 
 # 常见数字货币代码列表（需要添加 -USD 后缀）
 CRYPTO_SYMBOLS = {
@@ -217,6 +218,9 @@ def get_price_from_akshare(ticker_symbol):
     return None
 
 def update_portfolio():
+    if not notion:
+        raise ValueError("❌ 错误: 未找到 NOTION_TOKEN 或 DATABASE_ID 环境变量")
+
     # 1. 获取汇率
     rates = get_exchange_rates()
     
