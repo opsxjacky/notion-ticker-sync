@@ -9,6 +9,7 @@ try:
     import akshare as ak
     AKSHARE_AVAILABLE = True
 except ImportError:
+    ak = None
     AKSHARE_AVAILABLE = False
     print("⚠️ akshare 未安装，将跳过中国ETF基金数据获取（可选安装: pip install akshare）")
 

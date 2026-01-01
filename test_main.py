@@ -5,6 +5,7 @@ from main import get_price_from_akshare
 
 class TestAkshare(unittest.TestCase):
 
+    @patch('main.AKSHARE_AVAILABLE', True)
     @patch('main.ak.fund_etf_spot_em')
     @patch('main.ak.stock_zh_a_spot_em')
     @patch('main.ak.fund_etf_hist_em')
