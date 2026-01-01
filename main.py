@@ -132,9 +132,9 @@ def get_price_from_akshare(ticker_symbol):
         # 方法3: 尝试获取历史数据（东方财富 - 推荐方法）
         try:
             # 使用 fund_etf_hist_em 获取最近的数据
-            from datetime import datetime, timedelta
-            end_date = datetime.now().strftime("%Y%m%d")
-            start_date = (datetime.now() - timedelta(days=5)).strftime("%Y%m%d")
+            from datetime import timedelta
+            end_date = datetime.datetime.now().strftime("%Y%m%d")
+            start_date = (datetime.datetime.now() - timedelta(days=5)).strftime("%Y%m%d")
             
             df = ak.fund_etf_hist_em(
                 symbol=ticker_symbol,
