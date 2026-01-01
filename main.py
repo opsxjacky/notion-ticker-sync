@@ -99,20 +99,16 @@ def get_price_from_akshare(ticker_symbol, spot_cache=None, etf_cache=None):
     
     try:
         # 判断是上海还是深圳，构建完整代码
+        full_code = ""
         if ticker_symbol.startswith('51') or ticker_symbol.startswith('50'):
             # 上海ETF基金
             full_code = f"sh{ticker_symbol}"
-            market = "sh"
         elif ticker_symbol.startswith('15') or ticker_symbol.startswith('16'):
             # 深圳ETF基金
             full_code = f"sz{ticker_symbol}"
-            market = "sz"
         elif ticker_symbol.startswith('10'):
             # 10开头可能是债券基金或其他类型基金（通常是上海）
             full_code = f"sh{ticker_symbol}"
-            market = "sh"
-        else:
-            return None
         
         # 方法1: 尝试使用实时行情接口（东方财富 - ETF基金）
         # 优先查缓存
@@ -220,20 +216,21 @@ def get_price_from_akshare(ticker_symbol, spot_cache=None, etf_cache=None):
             pass
         
         # 方法4: 尝试使用新浪接口（备选）
-        try:
-            df = ak.fund_etf_hist_sina(symbol=full_code, period="daily", adjust="qfq")
-            if df is not None and not df.empty:
-                # 返回最新收盘价
-                for field in ['close', '收盘', '收盘价']:
-                    if field in df.columns:
-                        close_price = df[field].iloc[-1]
-                        if close_price is not None:
-                            try:
-                                return float(close_price)
-                            except:
-                                continue
-        except:
-            pass
+        if full_code:
+            try:
+                df = ak.fund_etf_hist_sina(symbol=full_code, period="daily", adjust="qfq")
+                if df is not None and not df.empty:
+                    # 返回最新收盘价
+                    for field in ['close', '收盘', '收盘价']:
+                        if field in df.columns:
+                            close_price = df[field].iloc[-1]
+                            if close_price is not None:
+                                try:
+                                    return float(close_price)
+                                except:
+                                    continue
+            except:
+                pass
         
         # 方法5: 尝试使用基金净值接口
         try:
@@ -241,6 +238,22 @@ def get_price_from_akshare(ticker_symbol, spot_cache=None, etf_cache=None):
             if df is not None and not df.empty:
                 # 获取最新净值
                 for field in ['净值', '单位净值', 'nav']:
+                    if field in df.columns:
+                        nav = df[field].iloc[-1]
+                        if nav is not None:
+                            try:
+                                return float(nav)
+                            except:
+                                continue
+        except:
+            pass
+
+        # 方法6: 尝试作为开放式基金获取净值 (针对 00xxxx 等场外基金)
+        try:
+            df = ak.fund_open_fund_daily_em(symbol=ticker_symbol)
+            if df is not None and not df.empty:
+                # 字段通常是 '单位净值'
+                for field in ['单位净值', 'nav']:
                     if field in df.columns:
                         nav = df[field].iloc[-1]
                         if nav is not None:
@@ -403,11 +416,12 @@ def update_portfolio():
             
             # 方法3: 如果是中国基金代码且yfinance失败，尝试使用akshare
             if current_price is None and calc_currency == "CNY":
-                # 检查是否是基金代码（5开头ETF、1开头ETF/债券基金、10开头债券基金等）
+                # 检查是否是基金代码（5开头ETF、1开头ETF/债券基金、10开头债券基金、0开头开放式基金）
                 if ticker_symbol.isdigit() and (
                     ticker_symbol.startswith('5') or 
                     ticker_symbol.startswith('1') or 
-                    ticker_symbol.startswith('10')
+                    ticker_symbol.startswith('10') or
+                    ticker_symbol.startswith('0')
                 ):
                     try:
                         # 传入缓存进行查询
