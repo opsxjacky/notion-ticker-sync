@@ -384,13 +384,14 @@ def update_portfolio():
                     if os.path.exists(cache_file):
                         df = pd.read_csv(cache_file)
                         return df['pe_ttm']
-                    try:
-                        df = ak.stock_a_lg_indicator(symbol=symbol)
-                        if not df.empty:
-                            df[['date', 'pe_ttm']].to_csv(cache_file, index=False)
-                            return df['pe_ttm']
-                    except Exception as e:
-                        print(f"抓取{symbol}历史PE失败：{e}")
+                    # try:
+                    #     df = ak.stock_a_lg_indicator(symbol=symbol)
+                    #     if not df.empty:
+                    #         df[['date', 'pe_ttm']].to_csv(cache_file, index=False)
+                    #         return df['pe_ttm']
+                    # except Exception as e:
+                    #     print(f"抓取{symbol}历史PE失败：{e}")
+                    print(f"抓取{symbol}历史PE失败：stock_a_lg_indicator() 无法使用")
                     return pd.Series([])
                 # 高速本地查A股名称和现价
                 stock_name, current_price_a = get_name_price(ticker_symbol)
