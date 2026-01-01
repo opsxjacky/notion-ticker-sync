@@ -1,8 +1,26 @@
 import unittest
+import sys
+import os
 from unittest.mock import patch, MagicMock, mock_open
-import pandas as pd
 import datetime
 import json
+
+# --- 虚拟环境检查 ---
+if os.getenv("SKIP_VENV_CHECK") != "1" and sys.prefix == sys.base_prefix:
+    print("🛑 错误: 检测到您正在使用系统 Python 环境运行测试。")
+    print("请在虚拟环境中运行测试。")
+    print("\n请按照以下步骤操作:")
+    print("1. 创建虚拟环境 (在项目根目录): python3 -m venv venv")
+    print("2. 激活虚拟环境: source venv/bin/activate")
+    print("3. 安装依赖: pip install -r requirements.txt")
+    print("4. 运行测试: python3 test_main.py\n")
+    sys.exit(1)
+
+try:
+    import pandas as pd
+except ImportError:
+    print("🛑 错误: 'pandas' 模块未找到。请在激活虚拟环境后，运行 'pip install -r requirements.txt' 安装依赖。")
+    sys.exit(1)
 
 from main import get_price_from_akshare, get_exchange_rates
 

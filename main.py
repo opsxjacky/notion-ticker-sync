@@ -1,9 +1,28 @@
 import os
+import sys
 import time
 import datetime
-import pandas as pd
 import json
 import pickle
+
+# --- 虚拟环境检查 ---
+# 强烈建议在虚拟环境中运行，以避免与系统库冲突
+# 在 CI/CD 或 Docker 环境中，可以设置环境变量 SKIP_VENV_CHECK=1 来跳过
+if os.getenv("SKIP_VENV_CHECK") != "1" and sys.prefix == sys.base_prefix:
+    print("🛑 错误: 检测到您正在使用系统 Python 环境。")
+    print("为了避免依赖冲突，请在虚拟环境中运行此脚本。")
+    print("\n请按照以下步骤操作:")
+    print("1. 创建虚拟环境 (在项目根目录): python3 -m venv venv")
+    print("2. 激活虚拟环境: source venv/bin/activate")
+    print("3. 安装依赖: pip install -r requirements.txt")
+    print("4. 运行脚本: python3 main.py\n")
+    sys.exit(1)
+
+try:
+    import pandas as pd
+except ImportError:
+    print("🛑 错误: 'pandas' 模块未找到。请在激活虚拟环境后，运行 'pip install -r requirements.txt' 安装依赖。")
+    sys.exit(1)
 
 try:
     import yfinance as yf
