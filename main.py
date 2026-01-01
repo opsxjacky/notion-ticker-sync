@@ -337,11 +337,27 @@ def update_portfolio():
                 raise ValueError(f"无法获取 {ticker_symbol} 的价格数据，可能是基金代码或已退市")
             
             # 更新 Notion（使用中文列名）
+            # 获取股票名称
+            stock_name = ""
+            try:
+                if calc_currency == "CNY" and AKSHARE_AVAILABLE:
+                    df = ak.stock_zh_a_spot_em()
+                    match = df[df['代码'] == ticker_symbol]
+                    if not match.empty:
+                        stock_name = match.iloc[0].get('名称', "")
+                else:
+                    stock_info = stock.info
+                    stock_name = stock_info.get("shortName", "") or stock_info.get("longName", "")
+            except Exception as e:
+                pass
+
             update_props = {
                 "现价": {"number": round(current_price, 2)},
                 "汇率": {"number": round(target_rate, 4)},
                 "货币": {"select": {"name": current_currency_name}}
             }
+            if stock_name:
+                update_props["股票名称"] = {"title": [{"text": {"content": stock_name}}]}
             
             # 如果 Notion 数据库中有"最后更新时间"字段，取消下面的注释并修改字段名
             # update_props["最后更新时间"] = {"date": {"start": datetime.datetime.now().isoformat()}}
