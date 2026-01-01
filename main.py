@@ -144,7 +144,23 @@ def update_portfolio():
             
             # 抓取股价
             stock = yf.Ticker(yf_ticker)
-            current_price = stock.fast_info.last_price
+            
+            # 尝试多种方式获取价格
+            current_price = None
+            try:
+                current_price = stock.fast_info.last_price
+            except:
+                try:
+                    # 如果 fast_info 失败，尝试获取历史数据
+                    hist = stock.history(period="1d")
+                    if not hist.empty:
+                        current_price = hist['Close'].iloc[-1]
+                except:
+                    pass
+            
+            # 如果仍然无法获取价格，抛出异常
+            if current_price is None or (isinstance(current_price, float) and current_price == 0):
+                raise ValueError(f"无法获取 {ticker_symbol} 的价格数据，可能是基金代码或已退市")
             
             # 更新 Notion（使用中文列名）
             update_props = {
@@ -167,6 +183,8 @@ def update_portfolio():
             # 如果只是字段不存在，给出更友好的提示
             if "is not a property that exists" in error_msg:
                 print(f" ❌ 失败: 字段不存在，请检查 Notion 数据库中的字段名")
+            elif "无法获取" in error_msg or "currentTradingPeriod" in error_msg or "Not Found" in error_msg:
+                print(f" ❌ 失败: 无法获取价格数据（可能是基金代码、已退市或数据源不支持）")
             else:
                 print(f" ❌ 失败: {e}")
         
