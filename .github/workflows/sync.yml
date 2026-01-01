@@ -38,6 +38,7 @@ jobs:
     # 5. 运行脚本 (注入 Secrets)
     - name: Run Sync Script
       env:
+        SKIP_VENV_CHECK: "1"  # GitHub Actions 环境已隔离，跳过虚拟环境检查
         NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
         DATABASE_ID: ${{ secrets.DATABASE_ID }}
       run: python main.py
