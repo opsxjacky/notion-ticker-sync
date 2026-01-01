@@ -263,6 +263,35 @@ def get_price_from_akshare(ticker_symbol, spot_cache=None, etf_cache=None):
                                 continue
         except:
             pass
+        
+        # 方法7: 尝试作为货币基金获取净值 (针对货币基金)
+        try:
+            df = ak.fund_money_fund_daily_em(symbol=ticker_symbol)
+            if df is not None and not df.empty:
+                # 货币基金通常净值为1，但这里我们尝试获取 '万份收益' 或 '七日年化' 吗？
+                # 不，我们通常需要净值。如果返回了数据，通常意味着基金存在。
+                # 很多货币基金净值固定为1，但有些可能有浮动。
+                # 如果没有单位净值字段，默认返回 1.0 (如果确认是货币基金)
+                # 但 akshare 的这个接口返回列: 净值日期, 每万份收益, 7日年化收益率, ...
+                # 如果是货币基金，价格通常是 1.0
+                return 1.0
+        except:
+            pass
+
+        # 方法8: 尝试作为理财型基金
+        try:
+            df = ak.fund_financial_fund_daily_em(symbol=ticker_symbol)
+            if df is not None and not df.empty:
+                for field in ['单位净值', 'nav']:
+                    if field in df.columns:
+                        nav = df[field].iloc[-1]
+                        if nav is not None:
+                            try:
+                                return float(nav)
+                            except:
+                                continue
+        except:
+            pass
             
     except Exception as e:
         # 静默失败，返回 None
@@ -415,7 +444,8 @@ def update_portfolio():
                     pass
             
             # 方法3: 如果是中国基金代码且yfinance失败，尝试使用akshare
-            if current_price is None and calc_currency == "CNY":
+            # 注意：yfinance 有时会返回 0.0 (例如暂停交易或数据缺失)，这也应该视为失败
+            if (current_price is None or (isinstance(current_price, (int, float)) and current_price == 0)) and calc_currency == "CNY":
                 # 检查是否是基金代码（5开头ETF、1开头ETF/债券基金、10开头债券基金、0开头开放式基金）
                 if ticker_symbol.isdigit() and (
                     ticker_symbol.startswith('5') or 
