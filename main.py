@@ -1112,4 +1112,15 @@ def update_portfolio():
     print("🎉 所有任务执行完毕。")
 
 if __name__ == "__main__":
+    # 1. 更新所有股票价格、PE、PB等数据
     update_portfolio()
+
+    # 2. 同步平安证券股票组合到账户总览
+    try:
+        from update_pingan_portfolio import main as sync_pingan_portfolio
+        print("\n" + "="*60)
+        sync_pingan_portfolio()
+    except ImportError as e:
+        print(f"\n⚠️  跳过平安证券组合同步: 模块导入失败 ({e})")
+    except Exception as e:
+        print(f"\n⚠️  平安证券组合同步失败: {e}")
