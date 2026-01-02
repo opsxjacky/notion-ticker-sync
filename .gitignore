@@ -31,3 +31,9 @@ Thumbs.db
 # Cache directories
 pe_cache/
 akshare_cache/
+
+# Debug/test scripts
+check_database_fields.py
+check_pingan_row.py
+check_relation_target.py
+update_account_overview.py
