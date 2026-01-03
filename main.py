@@ -681,6 +681,95 @@ def get_roe(ticker_symbol, calc_currency, stock, spot_cache, hk_cache):
     return roe
 
 
+def get_peg(ticker_symbol, calc_currency, stock, spot_cache, hk_cache):
+    """
+    获取PEG比率（Price/Earnings to Growth ratio，市盈率相对盈利增长比率）
+    PEG = PE / 盈利增长率，用于评估股票估值是否合理
+    参数：
+        ticker_symbol: 股票/ETF代码
+        calc_currency: 货币类型
+        stock: yfinance Ticker对象（可选）
+        spot_cache: A股行情缓存
+        hk_cache: 港股行情缓存
+    返回：
+        peg: PEG比率，如果无法获取则返回 None
+    """
+    peg = None
+
+    # 方法1: 从yfinance获取（适用于美股、港股）
+    if stock and calc_currency in ['USD', 'HKD']:
+        try:
+            stock_info = stock.info
+            peg_value = stock_info.get('pegRatio')
+            if peg_value is not None:
+                try:
+                    peg = float(peg_value)
+                    print(f"      [yfinance] 获取PEG: {peg:.2f}")
+                except:
+                    peg = None
+        except Exception as e:
+            pass
+
+    # 方法2: 从akshare获取A股PEG（东方财富A股实时行情中可能包含PEG）
+    if peg is None and calc_currency == 'CNY' and AKSHARE_AVAILABLE:
+        # 从spot_cache获取PEG
+        if ticker_symbol in spot_cache:
+            try:
+                row = spot_cache[ticker_symbol]
+                # 尝试多个可能的字段名
+                for field in ['PEG', 'peg', 'PEG比率']:
+                    peg_value = row.get(field)
+                    if peg_value is not None and peg_value != '-' and str(peg_value) != 'nan':
+                        try:
+                            peg = float(peg_value)
+                            print(f"      [A股] 从spot_cache获取PEG: {peg:.2f}")
+                            break
+                        except:
+                            continue
+            except Exception as e:
+                pass
+
+        # 如果spot_cache没有，尝试使用akshare的财务指标接口
+        if peg is None:
+            try:
+                # 使用股票财务指标接口获取PEG
+                df = ak.stock_financial_analysis_indicator(symbol=ticker_symbol)
+                if df is not None and not df.empty:
+                    # 获取最新的PEG数据
+                    for field in ['PEG比率', 'PEG', 'peg']:
+                        if field in df.columns:
+                            latest_peg = df[field].iloc[-1]
+                            if latest_peg is not None and str(latest_peg) != 'nan':
+                                try:
+                                    peg = float(latest_peg)
+                                    print(f"      [A股] 从财务指标获取PEG: {peg:.2f}")
+                                    break
+                                except:
+                                    continue
+            except Exception as e:
+                pass
+
+    # 方法3: 从akshare获取港股PEG
+    if peg is None and calc_currency == 'HKD' and AKSHARE_AVAILABLE:
+        hk_code = ticker_symbol.replace(".HK", "").zfill(5)
+        if hk_code in hk_cache:
+            try:
+                row = hk_cache[hk_code]
+                for field in ['PEG', 'peg', 'PEG比率']:
+                    peg_value = row.get(field)
+                    if peg_value is not None and peg_value != '-' and str(peg_value) != 'nan':
+                        try:
+                            peg = float(peg_value)
+                            print(f"      [港股] 从hk_cache获取PEG: {peg:.2f}")
+                            break
+                        except:
+                            continue
+            except Exception as e:
+                pass
+
+    return peg
+
+
 def calculate_fund_nav_growth(fund_code):
     """
     计算基金净值增长率
@@ -1152,6 +1241,11 @@ def update_portfolio():
             if roe is not None:
                 update_props["ROE"] = {"number": round(roe, 2)}
 
+            # === 新增：获取PEG比率 ===
+            peg = get_peg(ticker_symbol, calc_currency, stock, spot_cache, hk_cache)
+            if peg is not None:
+                update_props["PEG"] = {"number": round(peg, 2)}
+
             # === 新增：对于A股ETF，尝试获取对应指数的PE/PB和百分位（作为估值参考）===
             if calc_currency == "CNY" and pe_ratio is None and ticker_symbol in ETF_INDEX_MAPPING:
                 index_pe, index_pb, index_pe_percentile, index_pb_percentile = get_etf_index_pe_pb(ticker_symbol)
@@ -1243,6 +1337,8 @@ def update_portfolio():
                 log_message += f" | PB: {pb_ratio:.2f}"
             if roe is not None:
                 log_message += f" | ROE: {roe:.2f}%"
+            if peg is not None:
+                log_message += f" | PEG: {peg:.2f}"
             if ticker_symbol.startswith('0') and len(ticker_symbol) == 6 and growth_rates and '1y' in growth_rates:
                 log_message += f" | 年化: {growth_rates['1y']:.2f}%"
 
