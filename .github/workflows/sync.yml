@@ -33,7 +33,7 @@ jobs:
     - name: Run Tests
       env:
         SKIP_VENV_CHECK: "1"  # GitHub Actions 环境已隔离，跳过虚拟环境检查
-      run: python -m unittest test_main.py
+      run: python -m unittest discover -s tests -p "test_*.py"
 
     # 5. 运行脚本 (注入 Secrets)
     - name: Run Sync Script
