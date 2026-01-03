@@ -106,6 +106,16 @@ QDII_ETF_MAPPING = {
     '513050': 'SPY',    # 标普500ETF(另一只) → SPY
 }
 
+# 港股ETF到恒生指数的映射表（用于获取恒生指数PE数据）
+HK_ETF_INDEX_MAPPING = {
+    '2800.HK': 'HSI',      # 盈富基金 → 恒生指数
+    '02800.HK': 'HSI',     # 盈富基金 → 恒生指数
+    '2828.HK': 'HSCE',     # 恒生中国企业ETF → 恒生国企指数
+    '02828.HK': 'HSCE',    # 恒生中国企业ETF → 恒生国企指数
+    '3067.HK': 'HSTECH',   # 恒生科技ETF → 恒生科技指数
+    '03067.HK': 'HSTECH',  # 恒生科技ETF → 恒生科技指数
+}
+
 # PE 缓存目录
 CACHE_DIR = "./pe_cache"
 # Akshare 数据缓存目录
@@ -474,6 +484,81 @@ def get_pe_series_cached(symbol):
         print(f"抓取{symbol}历史PE失败：{e}")
     
     return pd.Series([])
+
+
+def get_hk_etf_index_pe(etf_code):
+    """
+    获取港股ETF对应的恒生指数PE和PE百分位
+    参数：
+        etf_code: 港股ETF代码，如'2800.HK'
+    返回：
+        (pe, pe_percentile) 二元组
+    """
+    # 检查是否有映射
+    index_code = HK_ETF_INDEX_MAPPING.get(etf_code)
+    if not index_code:
+        return None, None
+
+    try:
+        import requests
+        from bs4 import BeautifulSoup
+        import re
+
+        # 恒生指数数据URL（乐咕乐股网）
+        index_urls = {
+            'HSI': 'https://legulegu.com/stockdata/market/hsi',                     # 恒生指数
+            'HSCE': 'https://legulegu.com/stockdata/market/hscei',                  # 恒生国企指数
+            'HSTECH': 'https://legulegu.com/stockdata/hsi-theme-index?indexCode=HSTECH'  # 恒生科技指数
+        }
+
+        url = index_urls.get(index_code)
+        if not url:
+            return None, None
+
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
+        }
+
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+
+        # 解析HTML
+        soup = BeautifulSoup(response.text, 'html.parser')
+        text = soup.get_text()
+
+        # 提取当前PE
+        pe_match = re.search(r'市盈率[：:]\s*([0-9.]+)', text)
+        if not pe_match:
+            return None, None
+
+        pe = float(pe_match.group(1))
+
+        # 提取历史最高/最低PE计算百分位
+        max_pe_match = re.search(r'历史最高[：:]?\s*([0-9.]+)', text)
+        min_pe_match = re.search(r'历史最低[：:]?\s*([0-9.]+)', text)
+
+        pe_percentile = None
+        if max_pe_match and min_pe_match:
+            max_pe = float(max_pe_match.group(1))
+            min_pe = float(min_pe_match.group(1))
+            pe_percentile = (pe - min_pe) / (max_pe - min_pe) * 100
+        else:
+            # 使用恒生指数的历史范围作为默认值
+            # 基于1973-2025年的历史数据：最高38.1，最低6.2
+            if index_code == 'HSI':
+                pe_percentile = (pe - 6.2) / (38.1 - 6.2) * 100
+
+        print(f"      [恒生指数] {index_code} PE={pe:.2f}", end="")
+        if pe_percentile is not None:
+            print(f", 百分位={pe_percentile:.2f}%")
+        else:
+            print()
+
+        return pe, pe_percentile
+
+    except Exception as e:
+        print(f"      [恒生指数] 获取{index_code}失败: {e}")
+        return None, None
 
 
 def get_etf_index_pe_pb(etf_code):
@@ -1131,6 +1216,14 @@ def update_portfolio():
                                     pe_ratio = float(val)
                                 except:
                                     pass
+
+                    # 3. 如果港股ETF仍然没有PE，尝试从恒生指数获取
+                    if pe_ratio is None and ticker_symbol in HK_ETF_INDEX_MAPPING:
+                        index_pe, index_pe_percentile = get_hk_etf_index_pe(ticker_symbol)
+                        if index_pe is not None:
+                            pe_ratio = index_pe
+                            if index_pe_percentile is not None:
+                                pe_percentile = index_pe_percentile
 
                 # 尝试使用 yfinance 补充名称、PE、PE百分位
                 if stock:
