@@ -35,4 +35,3 @@ akshare_cache/
 # Debug/utility scripts (in scripts/)
 scripts/check_*.py
 scripts/update_account_overview.py
-scripts/update_pingan_portfolio.py
