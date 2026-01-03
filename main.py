@@ -1440,7 +1440,7 @@ if __name__ == "__main__":
 
     # 2. 同步平安证券股票组合到账户总览
     try:
-        from update_pingan_portfolio import main as sync_pingan_portfolio
+        from scripts.update_pingan_portfolio import main as sync_pingan_portfolio
         print("\n" + "="*60)
         sync_pingan_portfolio()
     except ImportError as e:
