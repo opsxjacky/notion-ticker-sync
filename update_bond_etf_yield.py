@@ -96,26 +96,28 @@ def update_notion_yield(page_id, yield_value):
         return False
 
 if __name__ == "__main__":
-    TARGET_TICKER = "511520"
-    
+    # Bond ETFs that use 10-year China government bond yield
+    TARGET_TICKERS = ["511520", "511260"]
+
     print(f"Fetching 10-year China bond yield...")
     current_yield = get_china_10y_bond_yield()
-    
+
     if current_yield is not None:
         print(f"Current Yield: {current_yield}%")
-        
-        print(f"Searching for page {TARGET_TICKER} in Notion...")
-        page_id = find_page_id_by_ticker(TARGET_TICKER)
-        
-        if page_id:
-            print(f"Found page ID: {page_id}. Updating Yield field...")
-            success = update_notion_yield(page_id, current_yield)
-            
-            if success:
-                print("Successfully updated Yield field.")
+
+        for ticker in TARGET_TICKERS:
+            print(f"\nSearching for page {ticker} in Notion...")
+            page_id = find_page_id_by_ticker(ticker)
+
+            if page_id:
+                print(f"Found page ID: {page_id}. Updating Yield field...")
+                success = update_notion_yield(page_id, current_yield)
+
+                if success:
+                    print(f"Successfully updated {ticker} Yield field.")
+                else:
+                    print(f"Failed to update {ticker} Yield field.")
             else:
-                print("Failed to update Yield field.")
-        else:
-            print("Process aborted due to missing page ID.")
+                print(f"Skipping {ticker} due to missing page ID.")
     else:
         print("Process aborted due to missing yield data.")
