@@ -32,8 +32,7 @@ Thumbs.db
 pe_cache/
 akshare_cache/
 
-# Debug/test scripts
-check_database_fields.py
-check_pingan_row.py
-check_relation_target.py
-update_account_overview.py
+# Debug/utility scripts (in scripts/)
+scripts/check_*.py
+scripts/update_account_overview.py
+scripts/update_pingan_portfolio.py
