@@ -8,30 +8,66 @@ import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'scripts')))
 
 from update_bond_etf_yield import (
+    get_china_bond_yield,
     get_china_10y_bond_yield,
-    find_page_id_by_ticker,
-    update_notion_yield
+    get_china_5y_bond_yield,
+    get_china_30y_bond_yield,
 )
+
 
 class TestBondYieldUpdate(unittest.TestCase):
 
-    @patch('update_bond_etf_yield.ak.bond_china_yield')
+    @patch('update_bond_etf_yield.ak.bond_zh_us_rate')
     def test_get_china_10y_bond_yield_success(self, mock_akshare):
-        """Test successful fetching of bond yield."""
-        # Create a mock DataFrame similar to what akshare returns
+        """Test successful fetching of 10-year bond yield."""
         mock_data = {
-            '10年期': [2.35, 2.40, 2.45]
+            '日期': ['2025-12-30', '2025-12-31'],
+            '中国国债收益率10年': [1.85, 1.8473],
+            '中国国债收益率5年': [1.62, 1.6309],
+            '中国国债收益率30年': [2.25, 2.2674],
         }
         mock_df = pd.DataFrame(mock_data)
         mock_akshare.return_value = mock_df
 
         result = get_china_10y_bond_yield()
 
-        self.assertEqual(result, 2.45)
+        self.assertEqual(result, 1.8473)
         mock_akshare.assert_called_once()
 
-    @patch('update_bond_etf_yield.ak.bond_china_yield')
-    def test_get_china_10y_bond_yield_exception(self, mock_akshare):
+    @patch('update_bond_etf_yield.ak.bond_zh_us_rate')
+    def test_get_china_5y_bond_yield_success(self, mock_akshare):
+        """Test successful fetching of 5-year bond yield."""
+        mock_data = {
+            '日期': ['2025-12-30', '2025-12-31'],
+            '中国国债收益率10年': [1.85, 1.8473],
+            '中国国债收益率5年': [1.62, 1.6309],
+            '中国国债收益率30年': [2.25, 2.2674],
+        }
+        mock_df = pd.DataFrame(mock_data)
+        mock_akshare.return_value = mock_df
+
+        result = get_china_5y_bond_yield()
+
+        self.assertEqual(result, 1.6309)
+
+    @patch('update_bond_etf_yield.ak.bond_zh_us_rate')
+    def test_get_china_30y_bond_yield_success(self, mock_akshare):
+        """Test successful fetching of 30-year bond yield."""
+        mock_data = {
+            '日期': ['2025-12-30', '2025-12-31'],
+            '中国国债收益率10年': [1.85, 1.8473],
+            '中国国债收益率5年': [1.62, 1.6309],
+            '中国国债收益率30年': [2.25, 2.2674],
+        }
+        mock_df = pd.DataFrame(mock_data)
+        mock_akshare.return_value = mock_df
+
+        result = get_china_30y_bond_yield()
+
+        self.assertEqual(result, 2.2674)
+
+    @patch('update_bond_etf_yield.ak.bond_zh_us_rate')
+    def test_get_china_bond_yield_exception(self, mock_akshare):
         """Test handling of exceptions during data fetching."""
         mock_akshare.side_effect = Exception("Network error")
 
@@ -39,56 +75,22 @@ class TestBondYieldUpdate(unittest.TestCase):
 
         self.assertIsNone(result)
 
-    @patch('update_bond_etf_yield.requests.post')
-    def test_find_page_id_by_ticker_success(self, mock_post):
-        """Test successfully finding a page ID by ticker."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "results": [{"id": "test-page-id-123"}]
+    @patch('update_bond_etf_yield.ak.bond_zh_us_rate')
+    def test_get_china_bond_yield_empty_data(self, mock_akshare):
+        """Test handling of empty data."""
+        mock_data = {
+            '日期': ['2025-12-31'],
+            '中国国债收益率10年': [None],
+            '中国国债收益率5年': [None],
+            '中国国债收益率30年': [None],
         }
-        mock_post.return_value = mock_response
+        mock_df = pd.DataFrame(mock_data)
+        mock_akshare.return_value = mock_df
 
-        result = find_page_id_by_ticker("511520")
-
-        self.assertEqual(result, "test-page-id-123")
-        mock_post.assert_called_once()
-
-    @patch('update_bond_etf_yield.requests.post')
-    def test_find_page_id_by_ticker_not_found(self, mock_post):
-        """Test case where ticker is not found in database."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "results": []
-        }
-        mock_post.return_value = mock_response
-
-        result = find_page_id_by_ticker("999999")
+        result = get_china_10y_bond_yield()
 
         self.assertIsNone(result)
 
-    @patch('update_bond_etf_yield.requests.patch')
-    def test_update_notion_yield_success(self, mock_patch):
-        """Test successful update of Notion page."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.raise_for_status = MagicMock()
-        mock_patch.return_value = mock_response
-
-        result = update_notion_yield("test-page-id", 2.5)
-
-        self.assertTrue(result)
-        mock_patch.assert_called_once()
-
-    @patch('update_bond_etf_yield.requests.patch')
-    def test_update_notion_yield_failure(self, mock_patch):
-        """Test handling of exceptions during Notion update."""
-        mock_patch.side_effect = Exception("Update failed")
-
-        result = update_notion_yield("test-page-id", 2.5)
-
-        self.assertFalse(result)
 
 if __name__ == '__main__':
     unittest.main()
