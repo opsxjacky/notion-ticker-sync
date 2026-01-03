@@ -11,32 +11,46 @@ notion = None
 if NOTION_TOKEN:
     notion = Client(auth=NOTION_TOKEN, notion_version="2025-09-03")
 
-def get_china_10y_bond_yield():
+def get_china_bond_yield(years=10):
     """
-    Fetches the latest 10-year China government bond yield using akshare.
+    Fetches the latest China government bond yield using akshare.
     Uses bond_zh_us_rate API which provides up-to-date data.
+
+    Args:
+        years: Bond maturity in years (5 or 10)
     """
+    column_name = f'中国国债收益率{years}年'
     try:
         # Fetch bond yield data from akshare (中美国债收益率)
         df = ak.bond_zh_us_rate()
 
-        # Filter out rows with NaN values for China 10Y yield
-        df_valid = df.dropna(subset=['中国国债收益率10年'])
+        # Filter out rows with NaN values for the specified yield
+        df_valid = df.dropna(subset=[column_name])
 
         if df_valid.empty:
-            print("No valid data found for China 10Y bond yield")
+            print(f"No valid data found for China {years}Y bond yield")
             return None
 
         # Get the most recent valid data point
         latest_data = df_valid.iloc[-1]
 
-        # Extract the 10-year yield value
-        yield_value = latest_data['中国国债收益率10年']
+        # Extract the yield value
+        yield_value = latest_data[column_name]
 
         return float(yield_value)
     except Exception as e:
         print(f"Error fetching bond yield: {e}")
         return None
+
+
+def get_china_10y_bond_yield():
+    """Fetches the latest 10-year China government bond yield."""
+    return get_china_bond_yield(10)
+
+
+def get_china_5y_bond_yield():
+    """Fetches the latest 5-year China government bond yield."""
+    return get_china_bond_yield(5)
 
 def find_page_id_by_ticker(ticker):
     """
@@ -96,28 +110,48 @@ def update_notion_yield(page_id, yield_value):
         return False
 
 if __name__ == "__main__":
-    # Bond ETFs that use 10-year China government bond yield
-    TARGET_TICKERS = ["511520", "511260"]
+    # Bond ETFs grouped by bond maturity
+    TICKERS_10Y = ["511520", "511260"]  # Use 10-year bond yield
+    TICKERS_5Y = ["511010"]  # Use 5-year bond yield
 
-    print(f"Fetching 10-year China bond yield...")
-    current_yield = get_china_10y_bond_yield()
+    # Fetch 10-year bond yield
+    print("Fetching 10-year China bond yield...")
+    yield_10y = get_china_10y_bond_yield()
 
-    if current_yield is not None:
-        print(f"Current Yield: {current_yield}%")
-
-        for ticker in TARGET_TICKERS:
+    if yield_10y is not None:
+        print(f"10Y Yield: {yield_10y}%")
+        for ticker in TICKERS_10Y:
             print(f"\nSearching for page {ticker} in Notion...")
             page_id = find_page_id_by_ticker(ticker)
-
             if page_id:
                 print(f"Found page ID: {page_id}. Updating Yield field...")
-                success = update_notion_yield(page_id, current_yield)
-
+                success = update_notion_yield(page_id, yield_10y)
                 if success:
-                    print(f"Successfully updated {ticker} Yield field.")
+                    print(f"Successfully updated {ticker} Yield field with 10Y rate.")
                 else:
                     print(f"Failed to update {ticker} Yield field.")
             else:
                 print(f"Skipping {ticker} due to missing page ID.")
     else:
-        print("Process aborted due to missing yield data.")
+        print("Failed to fetch 10-year bond yield.")
+
+    # Fetch 5-year bond yield
+    print("\nFetching 5-year China bond yield...")
+    yield_5y = get_china_5y_bond_yield()
+
+    if yield_5y is not None:
+        print(f"5Y Yield: {yield_5y}%")
+        for ticker in TICKERS_5Y:
+            print(f"\nSearching for page {ticker} in Notion...")
+            page_id = find_page_id_by_ticker(ticker)
+            if page_id:
+                print(f"Found page ID: {page_id}. Updating Yield field...")
+                success = update_notion_yield(page_id, yield_5y)
+                if success:
+                    print(f"Successfully updated {ticker} Yield field with 5Y rate.")
+                else:
+                    print(f"Failed to update {ticker} Yield field.")
+            else:
+                print(f"Skipping {ticker} due to missing page ID.")
+    else:
+        print("Failed to fetch 5-year bond yield.")
