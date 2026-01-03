@@ -613,8 +613,16 @@ def get_roe(ticker_symbol, calc_currency, stock, spot_cache, hk_cache):
             roe_value = stock_info.get('returnOnEquity')
             if roe_value is not None:
                 try:
-                    # yfinance返回的是小数（如0.15表示15%），需要转换为百分比
-                    roe = float(roe_value) * 100
+                    roe_float = float(roe_value)
+                    # yfinance的ROE格式不统一：
+                    # - 小于1时是小数形式（如0.15表示15%）
+                    # - 大于1时可能已经是百分比形式（如1.71表示171%）
+                    # 为了统一，如果值在0-1之间，乘以100；否则直接使用
+                    if 0 < roe_float <= 1:
+                        roe = roe_float * 100
+                    else:
+                        # 直接使用原值（可能是百分比形式或异常高的ROE）
+                        roe = roe_float
                     print(f"      [yfinance] 获取ROE: {roe:.2f}%")
                 except:
                     roe = None
@@ -682,7 +690,8 @@ def get_peg(ticker_symbol, calc_currency, stock, spot_cache, hk_cache):
     if stock and calc_currency in ['USD', 'HKD']:
         try:
             stock_info = stock.info
-            peg_value = stock_info.get('pegRatio')
+            # 优先使用trailingPegRatio，因为pegRatio通常为None
+            peg_value = stock_info.get('trailingPegRatio') or stock_info.get('pegRatio')
             if peg_value is not None:
                 try:
                     peg = float(peg_value)
