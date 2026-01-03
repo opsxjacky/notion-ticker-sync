@@ -592,6 +592,95 @@ def get_pb_ratio(ticker_symbol, calc_currency, stock):
     return pb_ratio
 
 
+def get_roe(ticker_symbol, calc_currency, stock, spot_cache, hk_cache):
+    """
+    获取净资产收益率（ROE）
+    参数：
+        ticker_symbol: 股票/ETF代码
+        calc_currency: 货币类型
+        stock: yfinance Ticker对象（可选）
+        spot_cache: A股行情缓存
+        hk_cache: 港股行情缓存
+    返回：
+        roe: ROE百分比，如果无法获取则返回 None
+    """
+    roe = None
+
+    # 方法1: 从yfinance获取（适用于美股、港股）
+    if stock and calc_currency in ['USD', 'HKD']:
+        try:
+            stock_info = stock.info
+            roe_value = stock_info.get('returnOnEquity')
+            if roe_value is not None:
+                try:
+                    # yfinance返回的是小数（如0.15表示15%），需要转换为百分比
+                    roe = float(roe_value) * 100
+                    print(f"      [yfinance] 获取ROE: {roe:.2f}%")
+                except:
+                    roe = None
+        except Exception as e:
+            pass
+
+    # 方法2: 从akshare获取A股ROE
+    if roe is None and calc_currency == 'CNY' and AKSHARE_AVAILABLE:
+        # 从spot_cache获取ROE（东方财富A股实时行情中包含ROE）
+        if ticker_symbol in spot_cache:
+            try:
+                row = spot_cache[ticker_symbol]
+                # 尝试多个可能的字段名
+                for field in ['ROE', 'roe', '净资产收益率', '加权净资产收益率']:
+                    roe_value = row.get(field)
+                    if roe_value is not None and roe_value != '-' and str(roe_value) != 'nan':
+                        try:
+                            roe = float(roe_value)
+                            print(f"      [A股] 从spot_cache获取ROE: {roe:.2f}%")
+                            break
+                        except:
+                            continue
+            except Exception as e:
+                pass
+
+        # 如果spot_cache没有，尝试使用akshare的财务指标接口
+        if roe is None:
+            try:
+                # 使用股票财务指标接口获取ROE
+                df = ak.stock_financial_analysis_indicator(symbol=ticker_symbol)
+                if df is not None and not df.empty:
+                    # 获取最新的ROE数据
+                    for field in ['净资产收益率', 'ROE', '加权净资产收益率']:
+                        if field in df.columns:
+                            latest_roe = df[field].iloc[-1]
+                            if latest_roe is not None and str(latest_roe) != 'nan':
+                                try:
+                                    roe = float(latest_roe)
+                                    print(f"      [A股] 从财务指标获取ROE: {roe:.2f}%")
+                                    break
+                                except:
+                                    continue
+            except Exception as e:
+                pass
+
+    # 方法3: 从akshare获取港股ROE
+    if roe is None and calc_currency == 'HKD' and AKSHARE_AVAILABLE:
+        hk_code = ticker_symbol.replace(".HK", "").zfill(5)
+        if hk_code in hk_cache:
+            try:
+                row = hk_cache[hk_code]
+                for field in ['ROE', 'roe', '净资产收益率']:
+                    roe_value = row.get(field)
+                    if roe_value is not None and roe_value != '-' and str(roe_value) != 'nan':
+                        try:
+                            roe = float(roe_value)
+                            print(f"      [港股] 从hk_cache获取ROE: {roe:.2f}%")
+                            break
+                        except:
+                            continue
+            except Exception as e:
+                pass
+
+    return roe
+
+
 def calculate_fund_nav_growth(fund_code):
     """
     计算基金净值增长率
@@ -1058,6 +1147,11 @@ def update_portfolio():
             if pb_ratio is not None:
                 update_props["PB"] = {"number": round(pb_ratio, 2)}
 
+            # === 新增：获取ROE净资产收益率 ===
+            roe = get_roe(ticker_symbol, calc_currency, stock, spot_cache, hk_cache)
+            if roe is not None:
+                update_props["ROE"] = {"number": round(roe, 2)}
+
             # === 新增：对于A股ETF，尝试获取对应指数的PE/PB和百分位（作为估值参考）===
             if calc_currency == "CNY" and pe_ratio is None and ticker_symbol in ETF_INDEX_MAPPING:
                 index_pe, index_pb, index_pe_percentile, index_pb_percentile = get_etf_index_pe_pb(ticker_symbol)
@@ -1147,6 +1241,8 @@ def update_portfolio():
                 log_message += f" | PE百分位: {pe_percentile:.2f}%"
             if pb_ratio is not None:
                 log_message += f" | PB: {pb_ratio:.2f}"
+            if roe is not None:
+                log_message += f" | ROE: {roe:.2f}%"
             if ticker_symbol.startswith('0') and len(ticker_symbol) == 6 and growth_rates and '1y' in growth_rates:
                 log_message += f" | 年化: {growth_rates['1y']:.2f}%"
 
