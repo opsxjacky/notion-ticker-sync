@@ -98,6 +98,14 @@ ETF_INDEX_MAPPING = {
     # 其他行业ETF可以继续添加...
 }
 
+# 中国QDII ETF到美股ETF的映射表（用于获取美股PE数据）
+QDII_ETF_MAPPING = {
+    '159941': 'QQQ',    # 纳指ETF → QQQ (Invesco QQQ Trust)
+    '513500': 'SPY',    # 标普500ETF → SPY (SPDR S&P 500 ETF)
+    '513100': 'QQQ',    # 纳指100ETF → QQQ
+    '513050': 'SPY',    # 标普500ETF(另一只) → SPY
+}
+
 # PE 缓存目录
 CACHE_DIR = "./pe_cache"
 # Akshare 数据缓存目录
@@ -1066,6 +1074,54 @@ def update_portfolio():
                     if index_pb is not None and pb_ratio is None:
                         pb_ratio = index_pb
                         update_props["PB"] = {"number": round(index_pb, 2)}
+
+            # === 新增：对于QDII ETF（如纳指ETF/标普500ETF），使用美股对应ETF的PE数据 ===
+            if ticker_symbol in QDII_ETF_MAPPING:
+                us_etf_ticker = QDII_ETF_MAPPING[ticker_symbol]
+                print(f"      [QDII ETF] 使用美股ETF({us_etf_ticker})数据")
+                try:
+                    if yf:
+                        us_etf_stock = yf.Ticker(us_etf_ticker)
+                        us_etf_info = us_etf_stock.info
+
+                        # 获取PE
+                        us_pe = us_etf_info.get("trailingPE") or us_etf_info.get("forwardPE")
+                        if us_pe is not None:
+                            try:
+                                us_pe = float(us_pe)
+                                pe_ratio = us_pe
+                                update_props["PE"] = {"number": round(us_pe, 2)}
+                                print(f"      [QDII ETF] 获取{us_etf_ticker} PE: {us_pe:.2f}")
+
+                                # 计算PE百分位（使用5年历史数据）
+                                import numpy as np
+                                hist = us_etf_stock.history(period="5y", interval="1mo")
+                                if hist is not None and not hist.empty:
+                                    trailing_eps = us_etf_info.get("trailingEps")
+                                    if trailing_eps is not None and trailing_eps != 0:
+                                        hist_pe_ratios = hist['Close'] / float(trailing_eps)
+                                        hist_pe_ratios = hist_pe_ratios[hist_pe_ratios > 0]
+                                        if not hist_pe_ratios.empty:
+                                            us_pe_percentile = float(np.sum(hist_pe_ratios < us_pe)) / len(hist_pe_ratios) * 100
+                                            pe_percentile = us_pe_percentile
+                                            update_props["PE百分位"] = {"number": round(us_pe_percentile, 2)}
+                                            print(f"      [QDII ETF] 计算{us_etf_ticker} PE百分位: {us_pe_percentile:.2f}%")
+                                    else:
+                                        # 使用当前价格和PE反推EPS
+                                        current_price_for_calc = hist['Close'].iloc[-1]
+                                        if current_price_for_calc > 0 and us_pe > 0:
+                                            estimated_eps = current_price_for_calc / us_pe
+                                            hist_pe_ratios = hist['Close'] / estimated_eps
+                                            hist_pe_ratios = hist_pe_ratios[hist_pe_ratios > 0]
+                                            if not hist_pe_ratios.empty:
+                                                us_pe_percentile = float(np.sum(hist_pe_ratios < us_pe)) / len(hist_pe_ratios) * 100
+                                                pe_percentile = us_pe_percentile
+                                                update_props["PE百分位"] = {"number": round(us_pe_percentile, 2)}
+                                                print(f"      [QDII ETF] 计算{us_etf_ticker} PE百分位(估算): {us_pe_percentile:.2f}%")
+                            except Exception as e:
+                                print(f"      [QDII ETF] 处理PE数据失败: {e}")
+                except Exception as e:
+                    print(f"      [QDII ETF] 获取{us_etf_ticker}数据失败: {e}")
 
             # === 新增：对于场外基金，计算净值增长率 ===
             growth_rates = {}
