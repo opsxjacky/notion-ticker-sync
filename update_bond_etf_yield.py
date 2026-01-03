@@ -52,6 +52,12 @@ def get_china_5y_bond_yield():
     """Fetches the latest 5-year China government bond yield."""
     return get_china_bond_yield(5)
 
+
+def get_china_30y_bond_yield():
+    """Fetches the latest 30-year China government bond yield."""
+    return get_china_bond_yield(30)
+
+
 def find_page_id_by_ticker(ticker):
     """
     Searches the Notion database for a page with the specific ticker name.
@@ -113,6 +119,7 @@ if __name__ == "__main__":
     # Bond ETFs grouped by bond maturity
     TICKERS_10Y = ["511520", "511260"]  # Use 10-year bond yield
     TICKERS_5Y = ["511010"]  # Use 5-year bond yield
+    TICKERS_30Y = ["511090"]  # Use 30-year bond yield
 
     # Fetch 10-year bond yield
     print("Fetching 10-year China bond yield...")
@@ -155,3 +162,24 @@ if __name__ == "__main__":
                 print(f"Skipping {ticker} due to missing page ID.")
     else:
         print("Failed to fetch 5-year bond yield.")
+
+    # Fetch 30-year bond yield
+    print("\nFetching 30-year China bond yield...")
+    yield_30y = get_china_30y_bond_yield()
+
+    if yield_30y is not None:
+        print(f"30Y Yield: {yield_30y}%")
+        for ticker in TICKERS_30Y:
+            print(f"\nSearching for page {ticker} in Notion...")
+            page_id = find_page_id_by_ticker(ticker)
+            if page_id:
+                print(f"Found page ID: {page_id}. Updating Yield field...")
+                success = update_notion_yield(page_id, yield_30y)
+                if success:
+                    print(f"Successfully updated {ticker} Yield field with 30Y rate.")
+                else:
+                    print(f"Failed to update {ticker} Yield field.")
+            else:
+                print(f"Skipping {ticker} due to missing page ID.")
+    else:
+        print("Failed to fetch 30-year bond yield.")
