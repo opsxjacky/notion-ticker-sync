@@ -599,7 +599,7 @@ def get_roe(ticker_symbol, calc_currency, stock, spot_cache, hk_cache):
         ticker_symbol: 股票/ETF代码
         calc_currency: 货币类型
         stock: yfinance Ticker对象（可选）
-        spot_cache: A股行情缓存
+        spot_cache: A股行情缓存（未使用，保留参数兼容性）
         hk_cache: 港股行情缓存
     返回：
         roe: ROE百分比，如果无法获取则返回 None
@@ -621,52 +621,34 @@ def get_roe(ticker_symbol, calc_currency, stock, spot_cache, hk_cache):
         except Exception as e:
             pass
 
-    # 方法2: 从akshare获取A股ROE
+    # 方法2: 从akshare获取A股ROE（使用财务指标接口）
+    # 注意：spot_cache中没有ROE字段，所以直接使用财务指标接口
     if roe is None and calc_currency == 'CNY' and AKSHARE_AVAILABLE:
-        # 从spot_cache获取ROE（东方财富A股实时行情中包含ROE）
-        if ticker_symbol in spot_cache:
-            try:
-                row = spot_cache[ticker_symbol]
-                # 尝试多个可能的字段名
-                for field in ['ROE', 'roe', '净资产收益率', '加权净资产收益率']:
-                    roe_value = row.get(field)
-                    if roe_value is not None and roe_value != '-' and str(roe_value) != 'nan':
-                        try:
-                            roe = float(roe_value)
-                            print(f"      [A股] 从spot_cache获取ROE: {roe:.2f}%")
-                            break
-                        except:
-                            continue
-            except Exception as e:
-                pass
+        try:
+            # 使用股票财务指标接口获取ROE
+            df = ak.stock_financial_analysis_indicator(symbol=ticker_symbol)
+            if df is not None and not df.empty:
+                # 获取最新的ROE数据（优先使用加权净资产收益率）
+                for field in ['加权净资产收益率(%)', '净资产收益率(%)', 'ROE']:
+                    if field in df.columns:
+                        latest_roe = df.iloc[-1].get(field) if len(df) > 0 else None
+                        if latest_roe is not None and str(latest_roe) != 'nan' and latest_roe != '-':
+                            try:
+                                roe = float(latest_roe)
+                                print(f"      [A股] 从财务指标获取ROE: {roe:.2f}%")
+                                break
+                            except:
+                                continue
+        except Exception as e:
+            pass  # 静默失败，很多股票可能没有财务数据
 
-        # 如果spot_cache没有，尝试使用akshare的财务指标接口
-        if roe is None:
-            try:
-                # 使用股票财务指标接口获取ROE
-                df = ak.stock_financial_analysis_indicator(symbol=ticker_symbol)
-                if df is not None and not df.empty:
-                    # 获取最新的ROE数据
-                    for field in ['净资产收益率', 'ROE', '加权净资产收益率']:
-                        if field in df.columns:
-                            latest_roe = df[field].iloc[-1]
-                            if latest_roe is not None and str(latest_roe) != 'nan':
-                                try:
-                                    roe = float(latest_roe)
-                                    print(f"      [A股] 从财务指标获取ROE: {roe:.2f}%")
-                                    break
-                                except:
-                                    continue
-            except Exception as e:
-                pass
-
-    # 方法3: 从akshare获取港股ROE
+    # 方法3: 从akshare获取港股ROE（hk_cache可能有ROE字段）
     if roe is None and calc_currency == 'HKD' and AKSHARE_AVAILABLE:
         hk_code = ticker_symbol.replace(".HK", "").zfill(5)
         if hk_code in hk_cache:
             try:
                 row = hk_cache[hk_code]
-                for field in ['ROE', 'roe', '净资产收益率']:
+                for field in ['ROE', 'roe', '净资产收益率', '加权净资产收益率']:
                     roe_value = row.get(field)
                     if roe_value is not None and roe_value != '-' and str(roe_value) != 'nan':
                         try:
@@ -689,7 +671,7 @@ def get_peg(ticker_symbol, calc_currency, stock, spot_cache, hk_cache):
         ticker_symbol: 股票/ETF代码
         calc_currency: 货币类型
         stock: yfinance Ticker对象（可选）
-        spot_cache: A股行情缓存
+        spot_cache: A股行情缓存（未使用，保留参数兼容性）
         hk_cache: 港股行情缓存
     返回：
         peg: PEG比率，如果无法获取则返回 None
@@ -710,46 +692,28 @@ def get_peg(ticker_symbol, calc_currency, stock, spot_cache, hk_cache):
         except Exception as e:
             pass
 
-    # 方法2: 从akshare获取A股PEG（东方财富A股实时行情中可能包含PEG）
+    # 方法2: 从akshare获取A股PEG（使用财务指标接口）
+    # 注意：spot_cache中没有PEG字段，所以直接使用财务指标接口
     if peg is None and calc_currency == 'CNY' and AKSHARE_AVAILABLE:
-        # 从spot_cache获取PEG
-        if ticker_symbol in spot_cache:
-            try:
-                row = spot_cache[ticker_symbol]
-                # 尝试多个可能的字段名
-                for field in ['PEG', 'peg', 'PEG比率']:
-                    peg_value = row.get(field)
-                    if peg_value is not None and peg_value != '-' and str(peg_value) != 'nan':
-                        try:
-                            peg = float(peg_value)
-                            print(f"      [A股] 从spot_cache获取PEG: {peg:.2f}")
-                            break
-                        except:
-                            continue
-            except Exception as e:
-                pass
+        try:
+            # 使用股票财务指标接口获取PEG
+            df = ak.stock_financial_analysis_indicator(symbol=ticker_symbol)
+            if df is not None and not df.empty:
+                # 获取最新的PEG数据
+                for field in ['PEG比率', 'PEG', 'peg']:
+                    if field in df.columns:
+                        latest_peg = df.iloc[-1].get(field) if len(df) > 0 else None
+                        if latest_peg is not None and str(latest_peg) != 'nan' and latest_peg != '-':
+                            try:
+                                peg = float(latest_peg)
+                                print(f"      [A股] 从财务指标获取PEG: {peg:.2f}")
+                                break
+                            except:
+                                continue
+        except Exception as e:
+            pass  # 静默失败，很多股票可能没有财务数据
 
-        # 如果spot_cache没有，尝试使用akshare的财务指标接口
-        if peg is None:
-            try:
-                # 使用股票财务指标接口获取PEG
-                df = ak.stock_financial_analysis_indicator(symbol=ticker_symbol)
-                if df is not None and not df.empty:
-                    # 获取最新的PEG数据
-                    for field in ['PEG比率', 'PEG', 'peg']:
-                        if field in df.columns:
-                            latest_peg = df[field].iloc[-1]
-                            if latest_peg is not None and str(latest_peg) != 'nan':
-                                try:
-                                    peg = float(latest_peg)
-                                    print(f"      [A股] 从财务指标获取PEG: {peg:.2f}")
-                                    break
-                                except:
-                                    continue
-            except Exception as e:
-                pass
-
-    # 方法3: 从akshare获取港股PEG
+    # 方法3: 从akshare获取港股PEG（hk_cache可能有PEG字段）
     if peg is None and calc_currency == 'HKD' and AKSHARE_AVAILABLE:
         hk_code = ticker_symbol.replace(".HK", "").zfill(5)
         if hk_code in hk_cache:
