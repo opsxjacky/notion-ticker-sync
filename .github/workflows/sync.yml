@@ -42,3 +42,11 @@ jobs:
         NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
         DATABASE_ID: ${{ secrets.DATABASE_ID }}
       run: python main.py
+
+    # 6. 更新债券ETF到期收益率
+    - name: Update Bond ETF Yield
+      env:
+        SKIP_VENV_CHECK: "1"
+        NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+        DATABASE_ID: ${{ secrets.DATABASE_ID }}
+      run: python scripts/update_bond_etf_yield.py
