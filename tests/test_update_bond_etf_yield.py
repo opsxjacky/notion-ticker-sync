@@ -4,8 +4,8 @@ import pandas as pd
 import os
 import sys
 
-# Ensure the script can be imported from the current directory
-sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+# Add scripts directory to path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'scripts')))
 
 from update_bond_etf_yield import (
     get_china_10y_bond_yield,
