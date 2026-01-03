@@ -114,6 +114,7 @@ HK_ETF_INDEX_MAPPING = {
     '02828.HK': 'HSCE',    # 恒生中国企业ETF → 恒生国企指数
     '3067.HK': 'HSTECH',   # 恒生科技ETF → 恒生科技指数
     '03067.HK': 'HSTECH',  # 恒生科技ETF → 恒生科技指数
+    '159920': 'HSI',       # A股恒生ETF → 恒生指数
 }
 
 # PE 缓存目录
@@ -1193,6 +1194,14 @@ def update_portfolio():
                                     print(f"      [ETF] PE转换失败: {val}, 错误: {e}")
                             else:
                                 print(f"      [ETF] {ticker_symbol} 缓存中无PE数据（ETF通常无PE指标）")
+
+                        # 3. 如果A股ETF仍然没有PE，尝试从恒生指数获取（如159920）
+                        if pe_ratio is None and ticker_symbol in HK_ETF_INDEX_MAPPING:
+                            index_pe, index_pe_percentile = get_hk_etf_index_pe(ticker_symbol)
+                            if index_pe is not None:
+                                pe_ratio = index_pe
+                                if index_pe_percentile is not None:
+                                    pe_percentile = index_pe_percentile
 
                 # 尝试获取港股 PE (从 Akshare 缓存)
                 if calc_currency == 'HKD':
