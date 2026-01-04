@@ -121,6 +121,11 @@ if __name__ == "__main__":
     TICKERS_5Y = ["511010"]  # Use 5-year bond yield
     TICKERS_30Y = ["511090"]  # Use 30-year bond yield
 
+    # Fixed yield bonds (特别国债等固定收益率品种)
+    FIXED_YIELD_TICKERS = {
+        "102277": 2.33,  # 特别国债
+    }
+
     # Fetch 10-year bond yield
     print("Fetching 10-year China bond yield...")
     yield_10y = get_china_10y_bond_yield()
@@ -183,3 +188,18 @@ if __name__ == "__main__":
                 print(f"Skipping {ticker} due to missing page ID.")
     else:
         print("Failed to fetch 30-year bond yield.")
+
+    # Update fixed yield bonds (特别国债)
+    print("\nUpdating fixed yield bonds...")
+    for ticker, fixed_yield in FIXED_YIELD_TICKERS.items():
+        print(f"\nSearching for page {ticker} in Notion...")
+        page_id = find_page_id_by_ticker(ticker)
+        if page_id:
+            print(f"Found page ID: {page_id}. Updating Yield field with fixed rate {fixed_yield}%...")
+            success = update_notion_yield(page_id, fixed_yield)
+            if success:
+                print(f"Successfully updated {ticker} Yield field with fixed rate.")
+            else:
+                print(f"Failed to update {ticker} Yield field.")
+        else:
+            print(f"Skipping {ticker} due to missing page ID.")
