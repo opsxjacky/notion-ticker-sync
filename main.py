@@ -562,6 +562,39 @@ def get_hk_etf_index_pe(etf_code):
         return None, None
 
 
+def get_hk_index_pb_from_etf(index_code):
+    """
+    通过港股 ETF 获取恒生指数的 PB（市净率）
+    由于恒生指数 PB 数据难以通过免费 API 获取，使用 2800.HK（盈富基金）的 PB 作为代理
+
+    参数：
+        index_code: 指数代码，如 'HSI'
+    返回：
+        pb: 市净率，如果无法获取则返回 None
+    """
+    if index_code != 'HSI':
+        # 目前只支持恒生指数
+        return None
+
+    try:
+        import yfinance as yf
+
+        # 使用盈富基金 2800.HK 的 PB 作为恒生指数 PB 的代理
+        ticker = yf.Ticker('2800.HK')
+        info = ticker.info
+        pb = info.get('priceToBook')
+
+        if pb is not None:
+            pb = float(pb)
+            print(f"      [恒生指数] 从 2800.HK ETF 获取 PB={pb:.2f}")
+            return pb
+
+        return None
+    except Exception as e:
+        print(f"      [恒生指数] 获取 PB 失败: {e}")
+        return None
+
+
 def get_etf_index_pe_pb(etf_code):
     """
     获取ETF对应指数的PE、PB和PE/PB百分位
@@ -1308,6 +1341,13 @@ def update_portfolio():
 
             # === 新增：获取PB市净率 ===
             pb_ratio = get_pb_ratio(ticker_symbol, calc_currency, stock)
+
+            # 对于恒生 ETF（如 159920），如果 PB 未获取到，尝试从 2800.HK ETF 获取
+            if pb_ratio is None and ticker_symbol in HK_ETF_INDEX_MAPPING:
+                index_code = HK_ETF_INDEX_MAPPING.get(ticker_symbol)
+                if index_code == 'HSI':
+                    pb_ratio = get_hk_index_pb_from_etf(index_code)
+
             if pb_ratio is not None:
                 update_props["PB"] = {"number": round(pb_ratio, 2)}
 

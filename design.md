@@ -99,16 +99,18 @@ ETF_INDEX_MAPPING = {
 
 #### 1.5 港股 ETF 特殊处理
 
-以下港股 ETF 使用恒生指数 PE：
+以下港股 ETF 使用恒生指数 PE/PB：
 
 ```python
-HK_ETF_USE_HSI_PE = {
-    '159920',  # A股恒生ETF
-    '513660',  # 恒生ETF
-    '513380',  # 恒生科技ETF
+HK_ETF_INDEX_MAPPING = {
+    '159920': 'HSI',   # A股恒生ETF → 恒生指数
+    '513660': 'HSI',   # 恒生ETF → 恒生指数
+    '513380': 'HSTECH', # 恒生科技ETF → 恒生科技指数
     # ...
 }
 ```
+
+**PB 数据获取说明**：由于恒生指数 PB 数据难以通过免费 API 获取，使用 2800.HK（盈富基金）的 `priceToBook` 作为恒生指数 PB 的代理值。
 
 #### 1.6 汇率获取
 
