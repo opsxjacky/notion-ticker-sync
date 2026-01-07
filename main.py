@@ -1438,6 +1438,43 @@ def update_portfolio():
             # 如果 Notion 数据库中有"最后更新时间"字段，取消下面的注释并修改字段名
             # update_props["最后更新时间"] = {"date": {"start": datetime.datetime.now().isoformat()}}
 
+            # === 新增：卖出后跟踪 (Post-Sale Tracking) ===
+            # 逻辑：只有当"动作"为"卖出"且"卖出价格"大于0时，才计算"卖出后涨跌幅"
+            sold_price = None
+            sold_change_percent = None
+            
+            # 1. 检查动作是否为"卖出"
+            is_sold_action = False
+            try:
+                action_prop = props.get("动作")
+                if action_prop:
+                    action_val = ""
+                    if action_prop.get("select"):
+                        action_val = action_prop["select"]["name"]
+                    elif action_prop.get("rich_text") and len(action_prop["rich_text"]) > 0:
+                        action_val = action_prop["rich_text"][0]["text"]["content"]
+                    
+                    if "卖出" in action_val:
+                        is_sold_action = True
+            except:
+                pass
+
+            # 2. 如果是卖出动作，计算涨跌幅
+            if is_sold_action:
+                try:
+                    # 使用"成交价格"作为卖出价格
+                    sold_price_prop = props.get("成交价格")
+                    if sold_price_prop and sold_price_prop.get("number"):
+                        sold_price = float(sold_price_prop["number"])
+                        
+                    if sold_price and sold_price > 0 and final_price is not None:
+                        # 计算公式: (当前价格 - 成交价格) / 成交价格 * 100
+                        # 含义：卖出后，如果你还持有它，现在的盈亏比相对于卖出价是多少
+                        sold_change_percent = (final_price - sold_price) / sold_price * 100
+                        update_props["卖出后涨跌幅"] = {"number": round(sold_change_percent, 2)}
+                except Exception as e:
+                    print(f"      [卖出跟踪] 计算失败: {e}")
+
             notion.pages.update(
                 page_id=page_id,
                 properties=update_props
@@ -1454,6 +1491,10 @@ def update_portfolio():
                 log_message += f" | ROE: {roe:.2f}%"
             if peg is not None:
                 log_message += f" | PEG: {peg:.2f}"
+            # 只有在有卖出数据时才显示
+            if sold_change_percent is not None:
+                log_message += f" | 卖出后: {sold_change_percent:+.2f}%"
+
             if ticker_symbol.startswith('0') and len(ticker_symbol) == 6 and growth_rates and '1y' in growth_rates:
                 log_message += f" | 年化: {growth_rates['1y']:.2f}%"
 
