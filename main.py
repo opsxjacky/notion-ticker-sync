@@ -1438,43 +1438,6 @@ def update_portfolio():
             # 如果 Notion 数据库中有"最后更新时间"字段，取消下面的注释并修改字段名
             # update_props["最后更新时间"] = {"date": {"start": datetime.datetime.now().isoformat()}}
 
-            # === 新增：卖出后跟踪 (Post-Sale Tracking) ===
-            # 逻辑：只有当"动作"为"卖出"且"卖出价格"大于0时，才计算"卖出后涨跌幅"
-            sold_price = None
-            sold_change_percent = None
-            
-            # 1. 检查动作是否为"卖出"
-            is_sold_action = False
-            try:
-                action_prop = props.get("动作")
-                if action_prop:
-                    action_val = ""
-                    if action_prop.get("select"):
-                        action_val = action_prop["select"]["name"]
-                    elif action_prop.get("rich_text") and len(action_prop["rich_text"]) > 0:
-                        action_val = action_prop["rich_text"][0]["text"]["content"]
-                    
-                    if "卖出" in action_val:
-                        is_sold_action = True
-            except:
-                pass
-
-            # 2. 如果是卖出动作，计算涨跌幅
-            if is_sold_action:
-                try:
-                    # 使用"成交价格"作为卖出价格
-                    sold_price_prop = props.get("成交价格")
-                    if sold_price_prop and sold_price_prop.get("number"):
-                        sold_price = float(sold_price_prop["number"])
-                        
-                    if sold_price and sold_price > 0 and final_price is not None:
-                        # 计算公式: (当前价格 - 成交价格) / 成交价格 * 100
-                        # 含义：卖出后，如果你还持有它，现在的盈亏比相对于卖出价是多少
-                        sold_change_percent = (final_price - sold_price) / sold_price * 100
-                        update_props["卖出后涨跌幅"] = {"number": round(sold_change_percent, 2)}
-                except Exception as e:
-                    print(f"      [卖出跟踪] 计算失败: {e}")
-
             notion.pages.update(
                 page_id=page_id,
                 properties=update_props
@@ -1491,9 +1454,6 @@ def update_portfolio():
                 log_message += f" | ROE: {roe:.2f}%"
             if peg is not None:
                 log_message += f" | PEG: {peg:.2f}"
-            # 只有在有卖出数据时才显示
-            if sold_change_percent is not None:
-                log_message += f" | 卖出后: {sold_change_percent:+.2f}%"
 
             if ticker_symbol.startswith('0') and len(ticker_symbol) == 6 and growth_rates and '1y' in growth_rates:
                 log_message += f" | 年化: {growth_rates['1y']:.2f}%"
@@ -1512,6 +1472,93 @@ def update_portfolio():
         
         # 礼貌性延时，防止 API 速率限制
         time.sleep(0.5)
+
+    # === 卖出后涨跌幅更新 (交易流水表) ===
+    print("\n📊 正在更新交易流水表中的卖出后涨跌幅...")
+    try:
+        # 交易流水表数据源 ID
+        TRADE_LOG_DATA_SOURCE_ID = "2db4538c-fc22-8082-a3b1-000bf0590459"
+        
+        # 查询交易流水表
+        trade_response = notion.data_sources.query(data_source_id=TRADE_LOG_DATA_SOURCE_ID)
+        trade_pages = trade_response.get("results", [])
+        
+        # 先构建股票 page_id -> 现价 的映射
+        stock_prices = {}
+        for page in pages:
+            page_id = page["id"]
+            props = page["properties"]
+            current_price = None
+            if "现价" in props and props["现价"].get("number") is not None:
+                current_price = props["现价"]["number"]
+            stock_prices[page_id] = current_price
+        
+        sell_count = 0
+        update_count = 0
+        
+        for trade_page in trade_pages:
+            trade_props = trade_page["properties"]
+            
+            # 检查动作类型是否为卖出
+            action_val = None
+            if "动作类型" in trade_props:
+                action_prop = trade_props["动作类型"]
+                if action_prop.get("type") == "select" and action_prop.get("select"):
+                    action_val = action_prop["select"]["name"]
+            
+            if not action_val or "卖出" not in action_val:
+                continue
+            
+            sell_count += 1
+            
+            # 获取交易日期作为标识
+            trade_date = ""
+            if "交易日期" in trade_props:
+                t = trade_props["交易日期"]
+                if t.get("title") and len(t["title"]) > 0:
+                    trade_date = t["title"][0]["text"]["content"]
+            
+            # 获取成交单价
+            sold_price = None
+            if "成交单价" in trade_props:
+                p = trade_props["成交单价"]
+                if p.get("number") is not None:
+                    sold_price = float(p["number"])
+            
+            if sold_price is None or sold_price <= 0:
+                print(f"   ⚠️ {trade_date}: 成交单价无效，跳过")
+                continue
+            
+            # 获取关联标的的现价
+            current_price = None
+            related_id = None
+            if "关联标的" in trade_props:
+                r = trade_props["关联标的"]
+                if r.get("relation") and len(r["relation"]) > 0:
+                    related_id = r["relation"][0]["id"]
+                    current_price = stock_prices.get(related_id)
+            
+            if current_price is None:
+                print(f"   ⚠️ {trade_date}: 无法获取关联股票现价，跳过")
+                continue
+            
+            # 计算卖出后涨跌幅 (小数形式，如 0.05 表示 5%)
+            sold_change_percent = (current_price - sold_price) / sold_price
+            
+            # 更新交易流水表
+            notion.pages.update(
+                page_id=trade_page["id"],
+                properties={
+                    "卖出后涨跌幅": {"number": round(sold_change_percent, 4)}
+                }
+            )
+            update_count += 1
+            print(f"   ✅ {trade_date}: 成交价 {sold_price:.2f} → 现价 {current_price:.2f} = {sold_change_percent:+.2%}")
+            time.sleep(0.3)
+        
+        print(f"📈 卖出后涨跌幅更新完成: 共 {sell_count} 条卖出记录，更新 {update_count} 条")
+    except Exception as e:
+        print(f"⚠️ 卖出后涨跌幅更新失败: {e}")
 
     print("🎉 所有任务执行完毕。")
 
