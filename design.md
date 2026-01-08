@@ -4,6 +4,15 @@
 
 自动同步股票/基金/ETF行情数据到 Notion 数据库的工具。支持 A股、港股、美股、加密货币和场内/场外基金。
 
+主要功能：
+- **实时行情同步**：获取股票/基金/ETF的最新价格
+- **估值指标**：PE、PB、ROE、PEG 等财务指标
+- **历史百分位**：计算 PE 的历史百分位（基于近10年数据）
+- **汇率转换**：自动获取 USD/CNY、HKD/CNY 实时汇率
+- **卖出后跟踪**：自动计算已卖出股票的后续涨跌幅
+- **组合管理**：同步特定账户的持仓到账户总览
+- **债券ETF收益率**：自动更新国债ETF的到期收益率
+
 ## 目录结构
 
 ```
@@ -20,6 +29,8 @@ notion-ticker-sync/
 │   ├── __init__.py
 │   ├── update_bond_etf_yield.py    # 更新债券ETF到期收益率
 │   └── update_pingan_portfolio.py  # 同步平安证券组合到账户总览
+├── akshare_cache/              # Akshare 行情数据缓存目录（运行时生成）
+├── pe_cache/                   # PE 历史数据缓存目录（运行时生成）
 └── tests/                      # 单元测试
     ├── test_main.py
     ├── test_akshare_fund.py
@@ -64,8 +75,12 @@ notion-ticker-sync/
 | `股票代码` | title | 股票/基金代码（必填） |
 | `股票名称` | rich_text | 股票名称（自动获取） |
 | `货币` | select | 货币类型：CNY/HKD/USD |
-| `PE` | number | 市盈率 |
-| `PE百分位` | number | PE 历史百分位 |
+| `现价` | number | 当前价格 |
+| `汇率` | number | 当前汇率（基于 CNY） |
+| `PE` | number | 市盈率（TTM） |
+| `PE百分位` | number | PE 历史百分位（基于近10年数据） |
+| `PB` | number | 市净率 |
+| `ROE` | number | 净资产收益率（%） |
 | `PEG` | number | 市盈增长比率 |
 
 #### 1.3 卖出后跟踪功能
@@ -128,13 +143,49 @@ ETF 会自动映射到对应指数获取 PE/PB：
 
 ```python
 ETF_INDEX_MAPPING = {
+    # 沪深300系列
     '510300': '000300',  # 沪深300ETF → 沪深300指数
+    '159919': '000300',  # 沪深300ETF → 沪深300指数
+    '510330': '000300',  # 沪深300ETF → 沪深300指数
+
+    # 中证500系列
     '510500': '000905',  # 中证500ETF → 中证500指数
+    '159922': '000905',  # 中证500ETF → 中证500指数
+
+    # 上证50系列
     '510050': '000016',  # 上证50ETF → 上证50指数
+    '510710': '000016',  # 上证50ETF → 上证50指数
+
+    # 科创50系列
     '588000': '000688',  # 科创50ETF → 科创50指数
+    '588080': '000688',  # 科创50ETF → 科创50指数
+
+    # 创业板系列
     '159915': '399006',  # 创业板ETF → 创业板指
+    '159949': '399006',  # 创业板ETF → 创业板指
+
+    # 红利系列
     '510880': '000922',  # 红利ETF → 中证红利指数
-    # ... 更多映射
+
+    # 券商系列
+    '512000': '399975',  # 券商ETF → 证券公司指数
+    '512880': '399975',  # 券商ETF → 证券公司指数
+
+    # 银行系列
+    '512800': '399986',  # 银行ETF → 中证银行指数
+}
+```
+
+#### 1.5.1 QDII ETF 映射（中国QDII ETF → 美股ETF）
+
+用于获取纳指、标普500等美股指数的 PE 数据：
+
+```python
+QDII_ETF_MAPPING = {
+    '159941': 'QQQ',    # 纳指ETF → QQQ (Invesco QQQ Trust)
+    '513500': 'SPY',    # 标普500ETF → SPY (SPDR S&P 500 ETF)
+    '513100': 'QQQ',    # 纳指100ETF → QQQ
+    '513050': 'SPY',    # 标普500ETF(另一只) → SPY
 }
 ```
 
@@ -144,20 +195,61 @@ ETF_INDEX_MAPPING = {
 
 ```python
 HK_ETF_INDEX_MAPPING = {
-    '159920': 'HSI',   # A股恒生ETF → 恒生指数
-    '513660': 'HSI',   # 恒生ETF → 恒生指数
-    '513380': 'HSTECH', # 恒生科技ETF → 恒生科技指数
-    # ...
+    '2800.HK': 'HSI',      # 盈富基金 → 恒生指数
+    '02800.HK': 'HSI',     # 盈富基金 → 恒生指数
+    '2828.HK': 'HSCE',     # 恒生中国企业ETF → 恒生国企指数
+    '02828.HK': 'HSCE',    # 恒生中国企业ETF → 恒生国企指数
+    '3067.HK': 'HSTECH',   # 恒生科技ETF → 恒生科技指数
+    '03067.HK': 'HSTECH',  # 恒生科技ETF → 恒生科技指数
+    '159920': 'HSI',       # A股恒生ETF → 恒生指数
 }
 ```
+
+**PE 数据获取说明**：
+- 恒生指数 PE 从乐咕乐股网爬取（`legulegu.com`）
+- 支持恒生指数（HSI）、恒生国企指数（HSCE）、恒生科技指数（HSTECH）
+- PE 百分位基于历史最高/最低计算，如无法获取则使用恒生指数历史范围（6.2-38.1）
 
 **PB 数据获取说明**：由于恒生指数 PB 数据难以通过免费 API 获取，使用 2800.HK（盈富基金）的 `priceToBook` 作为恒生指数 PB 的代理值。
 
 #### 1.7 汇率获取
 
-使用 akshare 实时获取汇率：
-- USD/CNY
-- HKD/CNY
+使用 yfinance 实时获取汇率（Yahoo Finance 数据源）：
+- USD/CNY（代码：`CNY=X`）
+- HKD/CNY（代码：`HKDCNY=X`）
+
+汇率数据会缓存到 `akshare_cache/exchange_rates.json`，当天有效。
+
+如果 yfinance 未安装或获取失败，使用默认汇率：
+- USD/CNY: 7.28
+- HKD/CNY: 0.93
+
+#### 1.8 场外基金净值增长率计算
+
+对于 0 开头的6位数字代码（场外基金），会自动计算净值增长率：
+
+| 周期 | 说明 |
+|------|------|
+| 1m | 近1个月增长率 |
+| 3m | 近3个月增长率 |
+| 6m | 近6个月增长率 |
+| 1y | 近1年增长率（年化收益参考） |
+
+> 注：增长率目前仅在日志中输出，如需写入 Notion，可在代码中取消注释相关行。
+
+#### 1.9 加密货币支持
+
+支持以下常见加密货币（自动添加 `-USD` 后缀）：
+
+```python
+CRYPTO_SYMBOLS = {
+    'BTC', 'ETH', 'BNB', 'ADA', 'SOL', 'XRP', 'DOGE', 'DOT', 'MATIC',
+    'AVAX', 'SHIB', 'TRX', 'LTC', 'UNI', 'ATOM', 'ETC', 'XLM', 'ALGO',
+    'VET', 'FIL', 'ICP', 'EOS', 'AAVE', 'THETA', 'SAND', 'AXS', 'MANA',
+    'GALA', 'ENJ', 'CHZ', 'FLOW', 'NEAR', 'FTM', 'CRV', 'MKR', 'COMP',
+    'SNX', 'SUSHI', 'YFI', '1INCH', 'BAT', 'ZRX', 'LINK', 'GRT'
+}
+```
 
 ---
 
@@ -176,9 +268,18 @@ HK_ETF_INDEX_MAPPING = {
 | `511010` | 5年期 | 5年期国债ETF |
 | `511090` | 30年期 | 30年期国债ETF |
 
+#### 固定收益率品种
+
+| 代码 | 收益率 | 说明 |
+|------|--------|------|
+| `102277` | 2.33% | 特别国债 |
+
 #### 数据源
 
-使用 akshare `bond_zh_us_rate()` API 获取中美国债收益率。
+使用 akshare `bond_zh_us_rate()` API 获取中美国债收益率，数据列名：
+- `中国国债收益率5年`
+- `中国国债收益率10年`
+- `中国国债收益率30年`
 
 ---
 
@@ -222,18 +323,24 @@ HK_ETF_INDEX_MAPPING = {
 
 目录: `akshare_cache/`
 
-| 缓存文件 | 内容 | 有效期 |
-|----------|------|--------|
-| `spot_cache.pkl` | A股实时行情 | 当天 |
-| `etf_cache.pkl` | ETF实时行情 | 当天 |
-| `hk_cache.pkl` | 港股实时行情 | 当天 |
-| `open_fund_cache.pkl` | 开放式基金名称 | 当天 |
+| 缓存文件 | 内容 | 有效期 | 数据源 API |
+|----------|------|--------|-----------|
+| `spot_cache.pkl` | A股实时行情 | 当天 | `ak.stock_zh_a_spot_em()` |
+| `etf_cache.pkl` | ETF实时行情 | 当天 | `ak.fund_etf_spot_em()` |
+| `hk_cache.pkl` | 港股实时行情 | 当天 | `ak.stock_hk_spot_em()` |
+| `open_fund_cache.pkl` | 开放式基金名称 | 当天 | `ak.fund_name_em()` |
+| `exchange_rates.json` | 汇率数据 | 当天 | yfinance |
 
 ### PE 历史数据缓存
 
 目录: `pe_cache/`
 
-用于计算 PE 百分位的历史数据缓存。
+| 缓存文件 | 内容 | 数据源 API |
+|----------|------|-----------|
+| `{symbol}_pe.csv` | A股历史 PE | `ak.stock_a_lg_indicator()` |
+| `{symbol}_pe.csv` | 港股历史 PE | `ak.stock_hk_indicator()` |
+
+用于计算 PE 百分位的历史数据缓存，包含 `date` 和 `pe_ttm`（A股）或 `trade_date` 和 `pe_ratio`（港股）字段。
 
 ---
 
@@ -289,6 +396,28 @@ ETF_INDEX_MAPPING = {
 }
 ```
 
+### 添加新的 QDII ETF 映射
+
+在 `main.py` 的 `QDII_ETF_MAPPING` 字典中添加：
+
+```python
+QDII_ETF_MAPPING = {
+    '中国QDII代码': '美股ETF代码',
+    # ...
+}
+```
+
+### 添加新的港股 ETF 映射
+
+在 `main.py` 的 `HK_ETF_INDEX_MAPPING` 字典中添加：
+
+```python
+HK_ETF_INDEX_MAPPING = {
+    'ETF代码': '指数代码',  # HSI/HSCE/HSTECH
+    # ...
+}
+```
+
 ### 添加新的债券 ETF
 
 在 `scripts/update_bond_etf_yield.py` 中：
@@ -308,6 +437,12 @@ FIXED_YIELD_TICKERS = {
 
 在 `main.py` 的 `CRYPTO_SYMBOLS` 集合中添加。
 
+### 添加新账户的组合同步
+
+参考 `scripts/update_pingan_portfolio.py` 实现类似脚本，主要修改：
+1. 账户名称过滤条件
+2. 账户总览页面查找条件
+
 ---
 
 ## 常见问题
@@ -318,11 +453,69 @@ FIXED_YIELD_TICKERS = {
 1. 股票已退市
 2. 代码格式不正确
 3. 数据源暂时不可用
+4. 场外基金需要特殊处理（程序会自动尝试多种 API）
 
 ### Q: PE百分位如何计算？
 
-使用近5年的 PE 历史数据，计算当前 PE 在历史分布中的百分位。
+- **A股/港股**：使用 akshare 获取历史 PE 数据，计算当前 PE 在历史分布中的百分位
+- **美股**：使用 yfinance 获取近5年月度价格，结合 EPS 计算历史 PE 百分位
+- **指数 ETF**：使用中证指数接口获取近10年数据计算百分位
 
 ### Q: 如何添加新账户的组合同步？
 
 参考 `scripts/update_pingan_portfolio.py` 实现类似脚本。
+
+### Q: 场外基金价格获取的优先级是什么？
+
+程序会按以下顺序尝试获取场外基金（0开头6位数字）价格：
+1. `ak.fund_open_fund_info_em()` - 单位净值走势
+2. `ak.fund_etf_hist_em()` - ETF 历史数据
+3. `ak.fund_etf_hist_sina()` - 新浪接口
+4. `ak.fund_etf_fund_info_em()` - ETF 基金净值
+5. `ak.fund_open_fund_daily_em()` - 开放式基金日数据
+6. `ak.fund_money_fund_daily_em()` - 货币基金
+7. `ak.fund_financial_fund_daily_em()` - 理财型基金
+
+### Q: 支持哪些 Notion API 版本？
+
+当前使用 `notion_version="2025-09-03"`，支持多数据源数据库（Multi-Datasource Database）。
+
+---
+
+## 技术细节
+
+### Notion API 集成
+
+使用多数据源数据库查询方式：
+
+```python
+database = notion.databases.retrieve(database_id=DATABASE_ID)
+if 'data_sources' in database and database['data_sources']:
+    data_source_id = database['data_sources'][0]['id']
+    response = notion.data_sources.query(data_source_id=data_source_id)
+```
+
+### 价格获取优先级
+
+1. **yfinance**：美股、港股、加密货币首选
+2. **akshare 缓存**：A股、港股、ETF 使用预加载的缓存数据
+3. **akshare API**：场外基金使用专门的 API
+
+### 估值指标获取
+
+| 指标 | A股 | 港股 | 美股 |
+|------|-----|------|------|
+| PE | akshare 缓存/历史数据 | akshare 缓存/yfinance | yfinance |
+| PB | - | yfinance | yfinance |
+| ROE | `ak.stock_financial_analysis_indicator()` | akshare 缓存/yfinance | yfinance |
+| PEG | `ak.stock_financial_analysis_indicator()` | akshare 缓存/yfinance | yfinance |
+
+### 依赖库版本要求
+
+详见 `requirements.txt`，主要依赖：
+- `notion-client`: Notion API 客户端
+- `yfinance`: 美股/港股/加密货币行情
+- `akshare`: A股/ETF/港股/基金行情
+- `pandas`: 数据处理
+- `requests`: HTTP 请求
+- `beautifulsoup4`: HTML 解析（恒生指数数据爬取）

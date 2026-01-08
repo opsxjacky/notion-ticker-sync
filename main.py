@@ -1483,9 +1483,14 @@ def update_portfolio():
         trade_response = notion.data_sources.query(data_source_id=TRADE_LOG_DATA_SOURCE_ID)
         trade_pages = trade_response.get("results", [])
         
-        # 先构建股票 page_id -> 现价 的映射
+        # 重新查询股票投资组合表，获取最新的现价数据
+        # (因为上面的循环已经更新了现价，但本地 pages 变量是旧数据)
+        fresh_response = notion.data_sources.query(data_source_id=data_source_id)
+        fresh_pages = fresh_response.get("results", [])
+        
+        # 构建股票 page_id -> 现价 的映射（使用最新数据）
         stock_prices = {}
-        for page in pages:
+        for page in fresh_pages:
             page_id = page["id"]
             props = page["properties"]
             current_price = None
