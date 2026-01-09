@@ -1565,6 +1565,127 @@ def update_portfolio():
     except Exception as e:
         print(f"⚠️ 卖出后涨跌幅更新失败: {e}")
 
+    # === 买入后涨跌幅更新 (交易流水表) ===
+    print("\n📊 正在更新交易流水表中的买入后涨跌幅...")
+    try:
+        # 交易流水表数据源 ID (已在上方定义)
+        # TRADE_LOG_DATA_SOURCE_ID = "2db4538c-fc22-8082-a3b1-000bf0590459"
+        
+        # 如果 trade_pages 未定义（上面 try 块失败），重新查询
+        if 'trade_pages' not in dir() or trade_pages is None:
+            trade_response = notion.data_sources.query(data_source_id=TRADE_LOG_DATA_SOURCE_ID)
+            trade_pages = trade_response.get("results", [])
+        
+        # 如果 stock_prices 未定义，重新构建
+        if 'stock_prices' not in dir() or stock_prices is None:
+            fresh_response = notion.data_sources.query(data_source_id=data_source_id)
+            fresh_pages = fresh_response.get("results", [])
+            stock_prices = {}
+            for page in fresh_pages:
+                page_id = page["id"]
+                props = page["properties"]
+                current_price = None
+                if "现价" in props and props["现价"].get("number") is not None:
+                    current_price = props["现价"]["number"]
+                stock_prices[page_id] = current_price
+        
+        # 1. 先收集所有有卖出记录的股票 (关联标的 ID)
+        stocks_with_sell = set()
+        for trade_page in trade_pages:
+            trade_props = trade_page["properties"]
+            action_val = None
+            if "动作类型" in trade_props:
+                action_prop = trade_props["动作类型"]
+                if action_prop.get("type") == "select" and action_prop.get("select"):
+                    action_val = action_prop["select"]["name"]
+            
+            if action_val and "卖出" in action_val:
+                # 获取关联标的 ID
+                if "关联标的" in trade_props:
+                    r = trade_props["关联标的"]
+                    if r.get("relation") and len(r["relation"]) > 0:
+                        related_id = r["relation"][0]["id"]
+                        stocks_with_sell.add(related_id)
+        
+        print(f"   已识别 {len(stocks_with_sell)} 只有卖出记录的股票，其买入记录将跳过")
+        
+        # 2. 遍历买入记录，更新买入后涨跌幅
+        buy_count = 0
+        buy_update_count = 0
+        skip_count = 0
+        
+        for trade_page in trade_pages:
+            trade_props = trade_page["properties"]
+            
+            # 检查动作类型是否为买入
+            action_val = None
+            if "动作类型" in trade_props:
+                action_prop = trade_props["动作类型"]
+                if action_prop.get("type") == "select" and action_prop.get("select"):
+                    action_val = action_prop["select"]["name"]
+            
+            if not action_val or "买入" not in action_val:
+                continue
+            
+            buy_count += 1
+            
+            # 获取交易日期作为标识
+            trade_date = ""
+            if "交易日期" in trade_props:
+                t = trade_props["交易日期"]
+                if t.get("title") and len(t["title"]) > 0:
+                    trade_date = t["title"][0]["text"]["content"]
+            
+            # 获取关联标的 ID
+            related_id = None
+            if "关联标的" in trade_props:
+                r = trade_props["关联标的"]
+                if r.get("relation") and len(r["relation"]) > 0:
+                    related_id = r["relation"][0]["id"]
+            
+            # 检查该股票是否有卖出记录 → 跳过
+            if related_id and related_id in stocks_with_sell:
+                skip_count += 1
+                continue
+            
+            # 获取成交单价
+            buy_price = None
+            if "成交单价" in trade_props:
+                p = trade_props["成交单价"]
+                if p.get("number") is not None:
+                    buy_price = float(p["number"])
+            
+            if buy_price is None or buy_price <= 0:
+                print(f"   ⚠️ {trade_date}: 成交单价无效，跳过")
+                continue
+            
+            # 获取关联标的的现价
+            current_price = None
+            if related_id:
+                current_price = stock_prices.get(related_id)
+            
+            if current_price is None:
+                print(f"   ⚠️ {trade_date}: 无法获取关联股票现价，跳过")
+                continue
+            
+            # 计算买入后涨跌幅 (小数形式，如 0.05 表示 5%)
+            buy_change_percent = (current_price - buy_price) / buy_price
+            
+            # 更新交易流水表
+            notion.pages.update(
+                page_id=trade_page["id"],
+                properties={
+                    "买入后涨跌幅": {"number": round(buy_change_percent, 4)}
+                }
+            )
+            buy_update_count += 1
+            print(f"   ✅ {trade_date}: 成交价 {buy_price:.2f} → 现价 {current_price:.2f} = {buy_change_percent:+.2%}")
+            time.sleep(0.3)
+        
+        print(f"📈 买入后涨跌幅更新完成: 共 {buy_count} 条买入记录，更新 {buy_update_count} 条，跳过 {skip_count} 条（有卖出记录）")
+    except Exception as e:
+        print(f"⚠️ 买入后涨跌幅更新失败: {e}")
+
     print("🎉 所有任务执行完毕。")
 
 if __name__ == "__main__":
