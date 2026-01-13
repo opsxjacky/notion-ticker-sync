@@ -1589,25 +1589,25 @@ def update_portfolio():
                     current_price = props["现价"]["number"]
                 stock_prices[page_id] = current_price
         
-        # 1. 先收集所有有卖出记录的股票 (关联标的 ID)
-        stocks_with_sell = set()
-        for trade_page in trade_pages:
-            trade_props = trade_page["properties"]
-            action_val = None
-            if "动作类型" in trade_props:
-                action_prop = trade_props["动作类型"]
-                if action_prop.get("type") == "select" and action_prop.get("select"):
-                    action_val = action_prop["select"]["name"]
+        # 1. 构建 股票page_id -> 持仓数量 的映射（用于判断是否清仓）
+        # 只有持仓数量为0（清仓）的股票才停止买入追踪
+        stocks_fully_sold = set()  # 已清仓的股票
+        for page in fresh_pages:
+            page_id = page["id"]
+            props = page["properties"]
             
-            if action_val and "卖出" in action_val:
-                # 获取关联标的 ID
-                if "关联标的" in trade_props:
-                    r = trade_props["关联标的"]
-                    if r.get("relation") and len(r["relation"]) > 0:
-                        related_id = r["relation"][0]["id"]
-                        stocks_with_sell.add(related_id)
+            # 获取持仓数量（自动）字段
+            position_qty = None
+            if "持仓数量 (自动)" in props:
+                rollup = props["持仓数量 (自动)"]
+                if rollup.get("rollup") and rollup["rollup"].get("number") is not None:
+                    position_qty = rollup["rollup"]["number"]
+            
+            # 如果持仓数量为0，标记为已清仓
+            if position_qty is not None and position_qty == 0:
+                stocks_fully_sold.add(page_id)
         
-        print(f"   已识别 {len(stocks_with_sell)} 只有卖出记录的股票，其买入记录将跳过")
+        print(f"   已识别 {len(stocks_fully_sold)} 只已清仓的股票，其买入记录将跳过")
         
         # 2. 遍历买入记录，更新买入后涨跌幅
         buy_count = 0
@@ -1643,8 +1643,8 @@ def update_portfolio():
                 if r.get("relation") and len(r["relation"]) > 0:
                     related_id = r["relation"][0]["id"]
             
-            # 检查该股票是否有卖出记录 → 跳过
-            if related_id and related_id in stocks_with_sell:
+            # 检查该股票是否已清仓 → 跳过
+            if related_id and related_id in stocks_fully_sold:
                 skip_count += 1
                 continue
             
@@ -1682,7 +1682,7 @@ def update_portfolio():
             print(f"   ✅ {trade_date}: 成交价 {buy_price:.2f} → 现价 {current_price:.2f} = {buy_change_percent:+.2%}")
             time.sleep(0.3)
         
-        print(f"📈 买入后涨跌幅更新完成: 共 {buy_count} 条买入记录，更新 {buy_update_count} 条，跳过 {skip_count} 条（有卖出记录）")
+        print(f"📈 买入后涨跌幅更新完成: 共 {buy_count} 条买入记录，更新 {buy_update_count} 条，跳过 {skip_count} 条（已清仓）")
     except Exception as e:
         print(f"⚠️ 买入后涨跌幅更新失败: {e}")
 

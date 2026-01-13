@@ -2,8 +2,9 @@ name: Auto Stock Sync
 
 on:
   schedule:
-    # 计划任务：UTC 时间每天 21:00 (北京时间次日凌晨 05:00)
-    # 刚好美股收盘，A股开盘前
+    # 早：A股收盘后 - UTC 07:00 (北京时间 15:00)
+    - cron: '0 7 * * 1-5'
+    # 晚：美股收盘后 - UTC 21:00 (北京时间次日凌晨 05:00)
     - cron: '0 21 * * 1-5' 
   workflow_dispatch: # 允许你在 GitHub 网页上手动点击按钮触发
 
