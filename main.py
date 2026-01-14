@@ -81,9 +81,10 @@ ETF_INDEX_MAPPING = {
     '588000': '000688',  # 科创50ETF → 科创50指数
     '588080': '000688',  # 科创50ETF → 科创50指数
 
-    # 创业板系列
-    '159915': '399006',  # 创业板ETF → 创业板指
-    '159949': '399006',  # 创业板ETF → 创业板指
+    # 创业板系列 - 使用中证1000作为PE代理（两者均为成长型中小盘，PE特征相似）
+    # 注：创业板指(399006)是深交所指数，中证指数API不提供其PE数据
+    '159915': '932000',  # 创业板ETF → 中证1000指数（PE代理）
+    '159949': '932000',  # 创业板ETF → 中证1000指数（PE代理）
 
     # 红利系列
     '510880': '000922',  # 红利ETF → 中证红利指数
@@ -610,6 +611,17 @@ def get_etf_index_pe_pb(etf_code):
     index_code = ETF_INDEX_MAPPING.get(etf_code)
     if not index_code:
         return None, None, None, None
+
+    # 代理指数映射（这些ETF使用其他指数的PE作为近似值，可能存在偏差）
+    PROXY_INDEX_MAPPING = {
+        '159915': ('932000', '中证1000', '创业板ETF'),  # 创业板ETF → 中证1000
+        '159949': ('932000', '中证1000', '创业板ETF'),
+    }
+
+    is_proxy = etf_code in PROXY_INDEX_MAPPING
+    if is_proxy:
+        proxy_info = PROXY_INDEX_MAPPING[etf_code]
+        print(f"      ⚠️ [{proxy_info[2]}] 使用 {proxy_info[1]} 作为PE代理（数据可能存在偏差）")
 
     pe = None
     pb = None
