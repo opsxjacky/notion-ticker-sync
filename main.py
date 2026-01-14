@@ -81,10 +81,11 @@ ETF_INDEX_MAPPING = {
     '588000': '000688',  # 科创50ETF → 科创50指数
     '588080': '000688',  # 科创50ETF → 科创50指数
 
-    # 创业板系列 - 使用中证1000作为PE代理（两者均为成长型中小盘，PE特征相似）
+    # 创业板系列 - 使用乐咕乐股的创业板市场整体PE数据
     # 注：创业板指(399006)是深交所指数，中证指数API不提供其PE数据
-    '159915': '932000',  # 创业板ETF → 中证1000指数（PE代理）
-    '159949': '932000',  # 创业板ETF → 中证1000指数（PE代理）
+    # 使用 stock_market_pe_lg('创业板') 获取创业板整体市场PE，更准确反映创业板指的估值
+    '159915': 'LG_CYB_MARKET',  # 创业板ETF → 创业板市场整体（乐咕乐股）
+    '159949': 'LG_CYB_MARKET',  # 创业板ETF → 创业板市场整体（乐咕乐股）
 
     # 红利系列
     '510880': '000922',  # 红利ETF → 中证红利指数
@@ -596,6 +597,100 @@ def get_hk_index_pb_from_etf(index_code):
         return None
 
 
+def _get_pe_from_legulegu(symbol, index_name):
+    """
+    从乐咕乐股获取指数PE数据
+    参数：
+        symbol: 乐咕乐股指数名称，如'创业板50'
+        index_name: 用于日志的指数名称
+    返回：
+        (pe, pb, pe_percentile, pb_percentile) 四元组
+    """
+    pe = None
+    pb = None
+    pe_percentile = None
+    pb_percentile = None
+
+    try:
+        df = ak.stock_index_pe_lg(symbol=symbol)
+        if df is not None and not df.empty:
+            # 获取最新滚动市盈率
+            pe = df['滚动市盈率'].iloc[-1]
+            if pe is not None:
+                try:
+                    pe = float(pe)
+                except:
+                    pe = None
+
+            # 计算PE百分位
+            if pe is not None and '滚动市盈率' in df.columns:
+                try:
+                    pe_series = df['滚动市盈率'].dropna()
+                    if len(pe_series) > 0:
+                        years = len(pe_series) / 252  # 约252个交易日/年
+                        pe_percentile = float((pe_series < pe).sum()) / len(pe_series) * 100
+                        print(f"      [乐咕乐股-{index_name}] PE={pe:.2f}, 百分位={pe_percentile:.2f}% (基于{years:.1f}年数据)")
+                except Exception as e:
+                    print(f"      [乐咕乐股-{index_name}] PE百分位计算失败: {e}")
+    except Exception as e:
+        print(f"      [乐咕乐股-{index_name}] 获取PE失败: {e}")
+
+    # 尝试获取PB数据
+    try:
+        df_pb = ak.stock_index_pb_lg(symbol=symbol)
+        if df_pb is not None and not df_pb.empty:
+            pb = df_pb['市净率'].iloc[-1]
+            if pb is not None:
+                try:
+                    pb = float(pb)
+                    # 计算PB百分位
+                    pb_series = df_pb['市净率'].dropna()
+                    if len(pb_series) > 0:
+                        years = len(pb_series) / 252
+                        pb_percentile = float((pb_series < pb).sum()) / len(pb_series) * 100
+                        print(f"      [乐咕乐股-{index_name}] PB={pb:.2f}, 百分位={pb_percentile:.2f}% (基于{years:.1f}年数据)")
+                except Exception as e:
+                    pb = None
+    except Exception as e:
+        pass  # PB数据不是所有指数都有，失败不影响PE
+
+    return pe, pb, pe_percentile, pb_percentile
+
+
+def _get_market_pe_from_legulegu(symbol, market_name):
+    """
+    从乐咕乐股获取市场整体PE数据（使用 stock_market_pe_lg 接口）
+    """
+    pe = None
+    pb = None
+    pe_percentile = None
+    pb_percentile = None
+
+    try:
+        df = ak.stock_market_pe_lg(symbol=symbol)
+        if df is not None and not df.empty:
+            pe = df['平均市盈率'].iloc[-1]
+            if pe is not None:
+                try:
+                    pe = float(pe)
+                except:
+                    pe = None
+
+            if pe is not None and '平均市盈率' in df.columns:
+                try:
+                    pe_series = df['平均市盈率'].dropna()
+                    if len(pe_series) > 0:
+                        years = len(pe_series) / 12
+                        pe_percentile = float((pe_series < pe).sum()) / len(pe_series) * 100
+                        print(f"      [乐咕乐股-{market_name}] PE={pe:.2f}, 百分位={pe_percentile:.2f}% (基于{years:.1f}年数据)")
+                except Exception as e:
+                    print(f"      [乐咕乐股-{market_name}] PE百分位计算失败: {e}")
+    except Exception as e:
+        print(f"      [乐咕乐股-{market_name}] 获取PE失败: {e}")
+
+    return pe, pb, pe_percentile, pb_percentile
+
+
 def get_etf_index_pe_pb(etf_code):
     """
     获取ETF对应指数的PE、PB和PE/PB百分位
@@ -612,23 +707,34 @@ def get_etf_index_pe_pb(etf_code):
     if not index_code:
         return None, None, None, None
 
-    # 代理指数映射（这些ETF使用其他指数的PE作为近似值，可能存在偏差）
-    PROXY_INDEX_MAPPING = {
-        '159915': ('932000', '中证1000', '创业板ETF'),  # 创业板ETF → 中证1000
-        '159949': ('932000', '中证1000', '创业板ETF'),
+    # 乐咕乐股指数映射（使用 stock_index_pe_lg 接口）
+    LG_INDEX_MAPPING = {
+        'LG_CYB50': '创业板50',
     }
 
-    is_proxy = etf_code in PROXY_INDEX_MAPPING
-    if is_proxy:
-        proxy_info = PROXY_INDEX_MAPPING[etf_code]
-        print(f"      ⚠️ [{proxy_info[2]}] 使用 {proxy_info[1]} 作为PE代理（数据可能存在偏差）")
+    # 乐咕乐股市场映射（使用 stock_market_pe_lg 接口，用于获取整体市场PE）
+    LG_MARKET_MAPPING = {
+        'LG_CYB_MARKET': '创业板',
+    }
+
+    # 检查是否使用乐咕乐股接口
+    if index_code.startswith('LG_'):
+        # 优先检查市场整体PE（stock_market_pe_lg）
+        lg_market_symbol = LG_MARKET_MAPPING.get(index_code)
+        if lg_market_symbol:
+            return _get_market_pe_from_legulegu(lg_market_symbol, f"{lg_market_symbol}市场")
+
+        # 其次检查指数PE（stock_index_pe_lg）
+        lg_symbol = LG_INDEX_MAPPING.get(index_code)
+        if lg_symbol:
+            return _get_pe_from_legulegu(lg_symbol, f"{lg_symbol}指数")
 
     pe = None
     pb = None
     pe_percentile = None
     pb_percentile = None
 
-    # === 1. 获取PE和PE百分位（使用10年数据）===
+    # === 1. 获取PE和PE百分位（使用中证指数API，10年数据）===
     try:
         from datetime import datetime, timedelta
         # 获取10年历史数据
