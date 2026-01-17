@@ -651,39 +651,44 @@ def get_hk_etf_index_pe(etf_code):
         response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
 
-        # 解析HTML
         soup = BeautifulSoup(response.text, 'html.parser')
-        text = soup.get_text()
 
-        # 提取当前PE
-        pe_match = re.search(r'市盈率[：:]\s*([0-9.]+)', text)
-        if not pe_match:
-            return None, None
-
-        pe = float(pe_match.group(1))
-
-        # 提取历史最高/最低PE计算百分位
-        max_pe_match = re.search(r'历史最高[：:]?\s*([0-9.]+)', text)
-        min_pe_match = re.search(r'历史最低[：:]?\s*([0-9.]+)', text)
-
+        pe = None
         pe_percentile = None
-        if max_pe_match and min_pe_match:
-            max_pe = float(max_pe_match.group(1))
-            min_pe = float(min_pe_match.group(1))
-            pe_percentile = (pe - min_pe) / (max_pe - min_pe) * 100
-        else:
-            # 使用恒生指数的历史范围作为默认值
-            # 基于1973-2025年的历史数据：最高38.1，最低6.2
-            if index_code == 'HSI':
-                pe_percentile = (pe - 6.2) / (38.1 - 6.2) * 100
+        pe_values = []
 
-        print(f"      [恒生指数] {index_code} PE={pe:.2f}", end="")
-        if pe_percentile is not None:
-            print(f", 百分位={pe_percentile:.2f}%")
-        else:
-            print()
+        table = soup.find('table', {'id': 'tableID'})
+        if not table:
+            table = soup.find('table', {'class': 'table'})
 
-        return pe, pe_percentile
+        if table:
+            rows = table.find_all('tr')
+            for row in rows[1:]:
+                cells = row.find_all('td')
+                if len(cells) >= 3:
+                    try:
+                        pe_val = float(cells[2].get_text().strip())
+                        pe_values.append(pe_val)
+                    except (ValueError, IndexError):
+                        pass
+
+            if pe_values:
+                pe = pe_values[0]
+                below_count = sum(1 for p in pe_values if p < pe)
+                pe_percentile = (below_count / len(pe_values)) * 100
+                years = len(pe_values) / 12
+                print(f"      [恒生指数] {index_code} PE={pe:.2f}, 百分位={pe_percentile:.2f}% (基于{years:.1f}年数据)")
+                return pe, pe_percentile
+
+        if pe is None:
+            text = soup.get_text()
+            pe_match = re.search(r'市盈率[：:]\s*([0-9.]+)', text)
+            if pe_match:
+                pe = float(pe_match.group(1))
+                print(f"      [恒生指数] {index_code} PE={pe:.2f} (无法计算百分位)")
+                return pe, None
+
+        return None, None
 
     except Exception as e:
         print(f"      [恒生指数] 获取{index_code}失败: {e}")
