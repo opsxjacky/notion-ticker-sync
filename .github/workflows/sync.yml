@@ -25,9 +25,16 @@ jobs:
       uses: actions/cache/restore@v4
       with:
         path: akshare_cache/signal_cache.json
-        key: signal-cache-${{ github.run_id }}
+        key: signal-cache-
         restore-keys: |
           signal-cache-
+
+    - name: Delete old signal cache
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        gh cache delete signal-cache- --repo ${{ github.repository }} || true
+      continue-on-error: true
 
     - name: Install dependencies
       run: |
@@ -60,4 +67,4 @@ jobs:
       if: always()
       with:
         path: akshare_cache/signal_cache.json
-        key: signal-cache-${{ github.run_id }}
+        key: signal-cache-
