@@ -6,48 +6,56 @@ on:
     - cron: '0 7 * * 1-5'
     # 晚：美股收盘后 - UTC 21:00 (北京时间次日凌晨 05:00)
     - cron: '0 21 * * 1-5' 
-  workflow_dispatch: # 允许你在 GitHub 网页上手动点击按钮触发
+  workflow_dispatch:
 
 jobs:
   update-stocks:
     runs-on: ubuntu-latest
     
     steps:
-    # 1. 拉取代码
     - name: Checkout code
       uses: actions/checkout@v3
 
-    # 2. 设置 Python 环境
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
 
-    # 3. 安装依赖
+    - name: Restore signal cache
+      uses: actions/cache@v4
+      with:
+        path: akshare_cache/signal_cache.json
+        key: signal-cache
+
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        # 使用 requirements.txt 安装所有依赖（包括 akshare）
         pip install -r requirements.txt
 
-    # 4. 运行单元测试
     - name: Run Tests
       env:
-        SKIP_VENV_CHECK: "1"  # GitHub Actions 环境已隔离，跳过虚拟环境检查
+        SKIP_VENV_CHECK: "1"
       run: python -m unittest discover -s tests -p "test_*.py"
 
-    # 5. 运行脚本 (注入 Secrets)
     - name: Run Sync Script
       env:
-        SKIP_VENV_CHECK: "1"  # GitHub Actions 环境已隔离，跳过虚拟环境检查
+        SKIP_VENV_CHECK: "1"
         NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
         DATABASE_ID: ${{ secrets.DATABASE_ID }}
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: python main.py
 
-    # 6. 更新债券ETF到期收益率
     - name: Update Bond ETF Yield
       env:
         SKIP_VENV_CHECK: "1"
         NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
         DATABASE_ID: ${{ secrets.DATABASE_ID }}
       run: python scripts/update_bond_etf_yield.py
+
+    - name: Save signal cache
+      uses: actions/cache/save@v4
+      if: always()
+      with:
+        path: akshare_cache/signal_cache.json
+        key: signal-cache

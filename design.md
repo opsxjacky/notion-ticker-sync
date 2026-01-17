@@ -47,6 +47,8 @@ notion-ticker-sync/
 | `NOTION_TOKEN` | Notion API Token |
 | `DATABASE_ID` | Notion 数据库 ID |
 | `SKIP_VENV_CHECK` | 设为 `1` 跳过虚拟环境检查（CI 环境用） |
+| `TELEGRAM_BOT_TOKEN` | Telegram Bot Token（可选，用于信号推送） |
+| `TELEGRAM_CHAT_ID` | Telegram Chat ID（可选，用于信号推送） |
 
 ### 依赖库
 
@@ -282,6 +284,30 @@ CRYPTO_SYMBOLS = {
 }
 ```
 
+#### 1.10 信号变化推送
+
+当以下字段值发生变化时，通过 Telegram Bot 推送通知：
+
+| 字段名 | 说明 |
+|--------|------|
+| `🚦 平安动态信号` | 平安证券动态信号 |
+| `🚦雪盈风险等级` | 雪盈风险等级 |
+
+**工作流程**：
+1. 读取上次运行时的信号值（缓存在 `akshare_cache/signal_cache.json`）
+2. 与当前值对比，检测变化
+3. 如有变化，通过 Telegram Bot 推送通知
+4. 保存当前值到缓存
+
+**推送格式**：
+```
+🚨 信号变化提醒
+
+📌 股票名称(代码)
+   🚦 平安动态信号
+   旧值 → 新值
+```
+
 ---
 
 ### 2. scripts/update_bond_etf_yield.py - 债券ETF收益率
@@ -343,10 +369,16 @@ CRYPTO_SYMBOLS = {
 
 1. 检出代码
 2. 设置 Python 3.11
-3. 安装依赖 (`requirements.txt`)
-4. 运行单元测试
-5. 执行 `main.py`（注入 Secrets）
-6. 执行 `scripts/update_bond_etf_yield.py` 更新债券ETF到期收益率
+3. 恢复信号缓存（用于检测信号变化）
+4. 安装依赖 (`requirements.txt`)
+5. 运行单元测试
+6. 执行 `main.py`（注入 Secrets，包括 Telegram 配置）
+7. 执行 `scripts/update_bond_etf_yield.py` 更新债券ETF到期收益率
+8. 保存信号缓存（持久化到 GitHub Actions Cache）
+
+#### 信号缓存持久化
+
+使用 `actions/cache@v4` 在 GitHub Actions 运行之间持久化 `signal_cache.json`，确保能够检测到信号变化并推送通知。
 
 ---
 
@@ -363,6 +395,7 @@ CRYPTO_SYMBOLS = {
 | `hk_cache.pkl` | 港股实时行情 | 当天 | `ak.stock_hk_spot_em()` |
 | `open_fund_cache.pkl` | 开放式基金名称 | 当天 | `ak.fund_name_em()` |
 | `exchange_rates.json` | 汇率数据 | 当天 | yfinance |
+| `signal_cache.json` | 信号字段值 | 持久 | 用于检测信号变化 |
 
 ### PE 历史数据缓存
 

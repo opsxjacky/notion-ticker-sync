@@ -42,9 +42,10 @@ except ImportError:
     print("⚠️ akshare 未安装，将跳过中国ETF基金数据获取（可选安装: pip install akshare）")
 
 # --- 环境变量配置 (CI/CD 注入) ---
-# 本地测试时，可以在终端 export 或者直接把字符串填在这里测试(测试完记得删掉)
 NOTION_TOKEN = os.getenv("NOTION_TOKEN")
 DATABASE_ID = os.getenv("DATABASE_ID")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 # 初始化 Notion (允许为空，以便单元测试导入此文件时不报错)
 if NOTION_TOKEN and DATABASE_ID:
@@ -123,6 +124,131 @@ HK_ETF_INDEX_MAPPING = {
 CACHE_DIR = "./pe_cache"
 # Akshare 数据缓存目录
 AKSHARE_CACHE_DIR = "./akshare_cache"
+# 信号缓存文件（用于检测变化）
+SIGNAL_CACHE_FILE = os.path.join(AKSHARE_CACHE_DIR, "signal_cache.json")
+
+# 需要监控的信号字段
+SIGNAL_FIELDS = ["🚦 平安动态信号", "🚦雪盈风险等级"]
+
+
+def send_telegram_message(message):
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        print("⚠️ Telegram 配置缺失，跳过推送")
+        return False
+
+    try:
+        import requests
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        payload = {
+            "chat_id": TELEGRAM_CHAT_ID,
+            "text": message,
+            "parse_mode": "HTML"
+        }
+        resp = requests.post(url, json=payload, timeout=10)
+        if resp.status_code == 200:
+            print(f"📤 Telegram 推送成功")
+            return True
+        else:
+            print(f"⚠️ Telegram 推送失败: {resp.text}")
+            return False
+    except Exception as e:
+        print(f"⚠️ Telegram 推送异常: {e}")
+        return False
+
+
+def load_signal_cache():
+    try:
+        if os.path.exists(SIGNAL_CACHE_FILE):
+            with open(SIGNAL_CACHE_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except Exception as e:
+        print(f"⚠️ 加载信号缓存失败: {e}")
+    return {}
+
+
+def save_signal_cache(cache):
+    try:
+        os.makedirs(AKSHARE_CACHE_DIR, exist_ok=True)
+        with open(SIGNAL_CACHE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(cache, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"⚠️ 保存信号缓存失败: {e}")
+
+
+def get_signal_value(props, field_name):
+    field = props.get(field_name)
+    if not field:
+        return None
+    field_type = field.get("type")
+    if field_type == "select" and field.get("select"):
+        return field["select"].get("name")
+    elif field_type == "rich_text" and field.get("rich_text"):
+        texts = field["rich_text"]
+        if texts:
+            return texts[0].get("text", {}).get("content")
+    elif field_type == "formula" and field.get("formula"):
+        formula = field["formula"]
+        return formula.get("string") or formula.get("number")
+    return None
+
+
+def check_and_notify_signal_changes(pages):
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return
+
+    print("\n📡 检查信号变化...")
+    old_cache = load_signal_cache()
+    new_cache = {}
+    changes = []
+
+    for page in pages:
+        page_id = page["id"]
+        props = page["properties"]
+
+        ticker_obj = props.get("股票代码") or props.get("Ticker")
+        if not ticker_obj or not ticker_obj.get("title"):
+            continue
+        ticker_list = ticker_obj["title"]
+        if not ticker_list:
+            continue
+        ticker = ticker_list[0]["text"]["content"]
+
+        name_obj = props.get("股票名称")
+        stock_name = ""
+        if name_obj and name_obj.get("rich_text"):
+            texts = name_obj["rich_text"]
+            if texts:
+                stock_name = texts[0].get("text", {}).get("content", "")
+
+        display_name = f"{stock_name}({ticker})" if stock_name else ticker
+
+        for field_name in SIGNAL_FIELDS:
+            current_value = get_signal_value(props, field_name)
+            cache_key = f"{ticker}|{field_name}"
+            old_value = old_cache.get(cache_key)
+            new_cache[cache_key] = current_value
+
+            if old_value is not None and current_value != old_value:
+                changes.append({
+                    "stock": display_name,
+                    "field": field_name,
+                    "old": old_value,
+                    "new": current_value
+                })
+
+    save_signal_cache(new_cache)
+
+    if changes:
+        lines = ["🚨 <b>信号变化提醒</b>\n"]
+        for c in changes:
+            lines.append(f"📌 <b>{c['stock']}</b>")
+            lines.append(f"   {c['field']}")
+            lines.append(f"   {c['old']} → {c['new']}\n")
+        message = "\n".join(lines)
+        send_telegram_message(message)
+        print(f"📡 检测到 {len(changes)} 个信号变化，已推送通知")
+    else:
+        print("📡 信号无变化")
 
 def get_exchange_rates():
     """
@@ -1154,6 +1280,8 @@ def update_portfolio():
         return
 
     print(f"🔍 找到 {len(pages)} 条持仓记录，开始更新...")
+
+    check_and_notify_signal_changes(pages)
 
     # 准备 PE 缓存目录
     os.makedirs(CACHE_DIR, exist_ok=True)
