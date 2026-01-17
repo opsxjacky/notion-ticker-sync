@@ -22,10 +22,12 @@ jobs:
         python-version: '3.11'
 
     - name: Restore signal cache
-      uses: actions/cache@v4
+      uses: actions/cache/restore@v4
       with:
         path: akshare_cache/signal_cache.json
-        key: signal-cache
+        key: signal-cache-${{ github.run_id }}
+        restore-keys: |
+          signal-cache-
 
     - name: Install dependencies
       run: |
@@ -58,4 +60,4 @@ jobs:
       if: always()
       with:
         path: akshare_cache/signal_cache.json
-        key: signal-cache
+        key: signal-cache-${{ github.run_id }}
